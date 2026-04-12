@@ -4,7 +4,7 @@ import "github.com/tmszcncl/accessyo_go/internal/types"
 
 type Input struct {
 	DNS  types.DnsResult
-	TCP  types.TcpResult
+	TCP  *types.TcpResult
 	TLS  *types.TlsResult
 	HTTP *types.HttpResult
 }
@@ -22,7 +22,7 @@ func Build(input Input) Result {
 	tls := input.TLS
 	http := input.HTTP
 
-	if !dns.Ok {
+	if !dns.Ok || tcp == nil {
 		return Result{
 			AllOK:       false,
 			Problem:     strPtr("Domain cannot be resolved"),

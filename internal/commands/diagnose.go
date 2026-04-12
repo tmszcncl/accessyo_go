@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/tmszcncl/accessyo_go/internal/checks"
@@ -20,29 +19,21 @@ func Diagnose(host string, port int) error {
 
 	spinner := startSpinner("Running checks...")
 
-	var dnsResult types.DnsResult
-	var tcpResult types.TcpResult
-
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		dnsResult = checks.CheckDNS(host, defaultTimeoutMs)
-	}()
-	go func() {
-		defer wg.Done()
-		tcpResult = checks.CheckTCP(host, port, defaultTimeoutMs)
-	}()
-	wg.Wait()
+	dnsResult := checks.CheckDNS(host, defaultTimeoutMs)
+	var tcpResult *types.TcpResult
+	if dnsResult.Ok {
+		r := checks.CheckTCP(host, port, defaultTimeoutMs)
+		tcpResult = &r
+	}
 
 	var tlsResult *types.TlsResult
-	if tcpResult.Ok {
+	if tcpResult != nil && tcpResult.Ok {
 		r := checks.CheckTLS(host, port, defaultTimeoutMs)
 		tlsResult = &r
 	}
 
 	var httpResult *types.HttpResult
-	if (tlsResult != nil && tlsResult.Ok) || (tlsResult == nil && tcpResult.Ok) {
+	if (tlsResult != nil && tlsResult.Ok) || (tlsResult == nil && tcpResult != nil && tcpResult.Ok) {
 		r := checks.CheckHTTP(host)
 		httpResult = &r
 	}
@@ -51,7 +42,7 @@ func Diagnose(host string, port int) error {
 
 	printDNS(dnsResult)
 	fmt.Println()
-	printTCP(tcpResult)
+	printTCP(tcpResult, !dnsResult.Ok)
 	fmt.Println()
 	printTLS(tlsResult)
 	fmt.Println()
@@ -112,7 +103,16 @@ func printDNS(result types.DnsResult) {
 	}
 }
 
-func printTCP(result types.TcpResult) {
+func printTCP(result *types.TcpResult, dnsFailed bool) {
+	if result == nil {
+		reason := ""
+		if dnsFailed {
+			reason = dim(" (DNS failed)")
+		}
+		fmt.Printf("  %s  TCP  %s%s\n", dim("-"), dim("skipped"), reason)
+		return
+	}
+
 	duration := dim(fmt.Sprintf("%dms", result.DurationMs))
 	if !result.Ok {
 		fmt.Printf("  %s  TCP  %s  %s\n\n", red("✗"), duration, dim(fmt.Sprintf("port %d", result.Port)))
@@ -250,7 +250,11 @@ func printSummary(input summary.Input) {
 	fmt.Println(line)
 	fmt.Println()
 	row("DNS", boolPtr(input.DNS.Ok), "")
-	row("TCP", boolPtr(input.TCP.Ok), "")
+	if input.TCP == nil {
+		row("TCP", nil, "")
+	} else {
+		row("TCP", boolPtr(input.TCP.Ok), "")
+	}
 	if input.TLS == nil {
 		row("TLS", nil, "")
 	} else {

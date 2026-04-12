@@ -107,6 +107,24 @@ func TestBuild_NullTLSAndHTTP(t *testing.T) {
 	}
 }
 
+func TestBuild_DNSFailureWhenTCPSkipped(t *testing.T) {
+	dns := okDNS()
+	dns.Ok = false
+	err := "NXDOMAIN"
+	code := "NXDOMAIN"
+	dns.Error = &err
+	dns.ErrorCode = &code
+
+	result := Build(Input{DNS: dns, TCP: nil, TLS: nil, HTTP: nil})
+
+	assertFalse(t, result.AllOK)
+	assertContainsPtr(t, result.Problem, "cannot be resolved")
+	assertContainsPtr(t, result.LikelyCause, "DNS")
+	if len(result.WhatYouCanDo) == 0 {
+		t.Fatalf("expected suggestions for DNS failure")
+	}
+}
+
 func okDNS() types.DnsResult {
 	return types.DnsResult{
 		Ok:         true,
@@ -116,8 +134,8 @@ func okDNS() types.DnsResult {
 	}
 }
 
-func okTCP() types.TcpResult {
-	return types.TcpResult{Ok: true, DurationMs: 20, Port: 443}
+func okTCP() *types.TcpResult {
+	return &types.TcpResult{Ok: true, DurationMs: 20, Port: 443}
 }
 
 func okTLS() *types.TlsResult {
