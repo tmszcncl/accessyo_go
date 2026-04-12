@@ -1,0 +1,37 @@
+name: Release Binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and Upload
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build binaries
+        run: |
+          mkdir -p dist
+
+          GOOS=linux GOARCH=amd64 go build -o dist/accessyo-linux-amd64 ./cmd/accessyo
+          GOOS=darwin GOARCH=amd64 go build -o dist/accessyo-darwin-amd64 ./cmd/accessyo
+          GOOS=darwin GOARCH=arm64 go build -o dist/accessyo-darwin-arm64 ./cmd/accessyo
+          GOOS=windows GOARCH=amd64 go build -o dist/accessyo-windows-amd64.exe ./cmd/accessyo
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
