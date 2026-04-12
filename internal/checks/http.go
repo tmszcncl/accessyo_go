@@ -46,8 +46,8 @@ func CheckHTTP(host string, aRecords []string, aaaaRecords []string) types.HttpR
 	var ipv4 *types.IpCheckResult
 	var ipv6 *types.IpCheckResult
 	if bothFamilies {
-		v4 := quickCheck(target, quickCheckOptions{family: 4})
-		v6 := quickCheck(target, quickCheckOptions{family: 6})
+		v4 := quickCheck(target, quickCheckOptions{family: 4, userAgent: accessyoUA})
+		v6 := quickCheck(target, quickCheckOptions{family: 6, userAgent: accessyoUA})
 		ipv4 = &v4
 		ipv6 = &v6
 	}
@@ -264,7 +264,8 @@ func DetectBlock(status int, headers map[string]string) *string {
 }
 
 type quickCheckOptions struct {
-	family int
+	family    int
+	userAgent string
 }
 
 func quickCheck(target string, options quickCheckOptions) types.IpCheckResult {
@@ -278,6 +279,9 @@ func quickCheck(target string, options quickCheckOptions) types.IpCheckResult {
 	if err != nil {
 		message := err.Error()
 		return types.IpCheckResult{Ok: false, DurationMs: elapsedMs(start), Error: &message}
+	}
+	if options.userAgent != "" {
+		req.Header.Set("User-Agent", options.userAgent)
 	}
 
 	resp, err := client.Do(req)
@@ -294,7 +298,8 @@ func quickCheck(target string, options quickCheckOptions) types.IpCheckResult {
 	_, _ = io.Copy(io.Discard, resp.Body)
 
 	statusCode := resp.StatusCode
-	ok := statusCode >= 200 && statusCode < 400
+	// A response (even 4xx) means IP-level connectivity is working.
+	ok := statusCode > 0 && statusCode < 500
 	return types.IpCheckResult{
 		Ok:         ok,
 		StatusCode: &statusCode,
