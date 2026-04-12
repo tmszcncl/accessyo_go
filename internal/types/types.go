@@ -64,15 +64,21 @@ type TlsResult struct {
 	Error             *string `json:"error,omitempty"`
 }
 
+type ResolverComparison struct {
+	PublicIPs    []string `json:"publicIps"`
+	SplitHorizon bool     `json:"splitHorizon"`
+}
+
 type DnsResult struct {
-	Ok          bool     `json:"ok"`
-	DurationMs  int64    `json:"durationMs"`
-	Resolver    string   `json:"resolver"`
-	ARecords    []string `json:"aRecords,omitempty"`
-	AaaaRecords []string `json:"aaaaRecords,omitempty"`
-	CNAME       *string  `json:"cname,omitempty"`
-	TTL         *uint32  `json:"ttl,omitempty"`
-	CDN         *string  `json:"cdn,omitempty"`
-	Error       *string  `json:"error,omitempty"`
-	ErrorCode   *string  `json:"errorCode,omitempty"`
+	Ok                 bool                `json:"ok"`
+	DurationMs         int64               `json:"durationMs"`
+	Resolver           string              `json:"resolver"`
+	ARecords           []string            `json:"aRecords,omitempty"`
+	AaaaRecords        []string            `json:"aaaaRecords,omitempty"`
+	CNAME              *string             `json:"cname,omitempty"`
+	TTL                *uint32             `json:"ttl,omitempty"`
+	CDN                *string             `json:"cdn,omitempty"`
+	ResolverComparison *ResolverComparison `json:"resolverComparison,omitempty"`
+	Error              *string             `json:"error,omitempty"`
+	ErrorCode          *string             `json:"errorCode,omitempty"`
 }

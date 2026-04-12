@@ -60,6 +60,9 @@ func checkOneWithTimeout(host string, timeoutMs int) batchResult {
 	if http.IPv6 != nil && !http.IPv6.Ok && (http.IPv6.Error == nil || *http.IPv6.Error != "timeout") {
 		warnings = append(warnings, "IPv6")
 	}
+	if dns.ResolverComparison != nil && dns.ResolverComparison.SplitHorizon {
+		warnings = append(warnings, "split-horizon")
+	}
 	if http.DurationMs > 2000 {
 		warnings = append(warnings, fmt.Sprintf("slow %dms", http.DurationMs))
 	}

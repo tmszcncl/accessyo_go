@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/netip"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -100,16 +102,18 @@ func CheckDNS(host string, timeoutMs int) types.DnsResult {
 	allIPs := append([]string{}, aRecords...)
 	allIPs = append(allIPs, aaaaRecords...)
 	cdn := DetectCdnFromIPs(allIPs)
+	resolverComparison := queryPublicResolver(host, aRecords, timeoutMs)
 
 	return types.DnsResult{
-		Ok:          true,
-		DurationMs:  elapsedMs(start),
-		Resolver:    resolver,
-		ARecords:    aRecords,
-		AaaaRecords: aaaaRecords,
-		CNAME:       cname,
-		TTL:         nil,
-		CDN:         cdn,
+		Ok:                 true,
+		DurationMs:         elapsedMs(start),
+		Resolver:           resolver,
+		ARecords:           aRecords,
+		AaaaRecords:        aaaaRecords,
+		CNAME:              cname,
+		TTL:                nil,
+		CDN:                cdn,
+		ResolverComparison: resolverComparison,
 	}
 }
 
@@ -219,6 +223,80 @@ func getResolver() string {
 	}
 
 	return "system"
+}
+
+func queryPublicResolver(host string, systemIPs []string, timeoutMs int) *types.ResolverComparison {
+	limit := timeoutMs
+	if limit <= 0 || limit > 3000 {
+		limit = 3000
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(limit)*time.Millisecond)
+	defer cancel()
+
+	resolver := &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, _ string, _ string) (net.Conn, error) {
+			d := net.Dialer{Timeout: time.Duration(limit) * time.Millisecond}
+			return d.DialContext(ctx, "udp", "1.1.1.1:53")
+		},
+	}
+
+	ips, err := resolver.LookupIP(ctx, "ip4", host)
+	if err != nil {
+		return nil
+	}
+	publicIPs := dedupeIPStrings(ips)
+	splitHorizon := detectSplitHorizon(systemIPs, publicIPs)
+
+	return &types.ResolverComparison{
+		PublicIPs:    publicIPs,
+		SplitHorizon: splitHorizon,
+	}
+}
+
+func detectSplitHorizon(systemIPs []string, publicIPs []string) bool {
+	systemHasPrivate := false
+	for _, ip := range systemIPs {
+		if IsPrivateIP(ip) {
+			systemHasPrivate = true
+			break
+		}
+	}
+
+	publicHasPrivate := false
+	for _, ip := range publicIPs {
+		if IsPrivateIP(ip) {
+			publicHasPrivate = true
+			break
+		}
+	}
+
+	return systemHasPrivate && !publicHasPrivate && len(publicIPs) > 0
+}
+
+func IsPrivateIP(ip string) bool {
+	if strings.HasPrefix(ip, "10.") || strings.HasPrefix(ip, "127.") || strings.HasPrefix(ip, "192.168.") {
+		return true
+	}
+	if !strings.HasPrefix(ip, "172.") {
+		return false
+	}
+
+	addr, err := netip.ParseAddr(ip)
+	if err != nil || !addr.Is4() {
+		return false
+	}
+
+	parts := strings.Split(ip, ".")
+	if len(parts) < 2 {
+		return false
+	}
+	second, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return false
+	}
+	return second >= 16 && second <= 31
 }
 
 func elapsedMs(start time.Time) int64 {

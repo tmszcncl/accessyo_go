@@ -14,7 +14,11 @@ func TestBuildJSONOutput(t *testing.T) {
 		DurationMs: 12,
 		Resolver:   "8.8.8.8",
 		ARecords:   []string{"1.2.3.4"},
-		TTL:        uint32Ptr(300),
+		ResolverComparison: &types.ResolverComparison{
+			PublicIPs:    []string{"1.2.3.4"},
+			SplitHorizon: false,
+		},
+		TTL: uint32Ptr(300),
 	}
 	baseTCP := &types.TcpResult{Ok: true, DurationMs: 30, Port: 443}
 	baseTLS := &types.TlsResult{Ok: true, DurationMs: 80}

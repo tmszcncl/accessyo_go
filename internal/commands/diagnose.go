@@ -157,6 +157,20 @@ func printDNS(result types.DnsResult, hideTiming bool) {
 	if result.CNAME != nil {
 		fmt.Printf("     %s %s\n", dim("CNAME:"), *result.CNAME)
 	}
+	if result.ResolverComparison != nil {
+		publicIPs := result.ResolverComparison.PublicIPs
+		sameIPs := sameIPSet(publicIPs, result.ARecords)
+		if !sameIPs {
+			publicText := dim("(no response)")
+			if len(publicIPs) > 0 {
+				publicText = strings.Join(publicIPs, ", ")
+			}
+			fmt.Printf("     %s %s\n", dim("1.1.1.1:"), publicText)
+		}
+		if result.ResolverComparison.SplitHorizon {
+			fmt.Printf("     %s split-horizon DNS detected (system DNS returns private IP)\n", yellow("->"))
+		}
+	}
 
 	if len(result.ARecords) == 0 && len(result.AaaaRecords) > 0 {
 		fmt.Printf("     %s IPv6 only - may fail on some networks\n", yellow("->"))
@@ -599,6 +613,27 @@ func orDefault(value *string, fallback string) string {
 }
 
 func boolPtr(v bool) *bool { return &v }
+
+func sameIPSet(a []string, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	if len(a) == 0 {
+		return true
+	}
+	seen := make(map[string]int, len(a))
+	for _, ip := range a {
+		seen[ip]++
+	}
+	for _, ip := range b {
+		count := seen[ip]
+		if count == 0 {
+			return false
+		}
+		seen[ip] = count - 1
+	}
+	return true
+}
 
 func green(s string) string  { return "\033[32m" + s + "\033[0m" }
 func red(s string) string    { return "\033[31m" + s + "\033[0m" }

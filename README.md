@@ -33,13 +33,13 @@ Accessyo does.
 The CLI is in active development. Currently supports:
 
 - Network context (public IP, country, DNS resolver)
-- DNS resolution (A, AAAA, CNAME records, TTL, resolver)
+- DNS resolution (A, AAAA, CNAME records, TTL, resolver, split-horizon check vs 1.1.1.1)
 - TCP connectivity check
 - TLS handshake (protocol, cipher, certificate info + expiry, hostname match, HTTP/2 via ALPN)
 - HTTP request (status, TTFB, redirects, IPv4/IPv6, browser UA comparison, CDN detection, WAF blocking, www/non-www canonical check, HSTS validation)
 - Timings summary (per-check + total)
 - Root cause diagnosis with actionable suggestions
-- Batch mode - check multiple domains at once with per-domain warnings (HSTS, cert expiry, IPv6, slow response)
+- Batch mode - check multiple domains at once with per-domain warnings (HSTS, cert expiry, IPv6, split-horizon DNS, slow response)
 
 Single domain (full detailed output):
 
