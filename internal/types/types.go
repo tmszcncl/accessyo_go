@@ -14,6 +14,10 @@ type IpCheckResult struct {
 	Error      *string
 }
 
+type WwwCheckResult struct {
+	Kind string
+}
+
 type HttpResult struct {
 	Ok                bool
 	DurationMs        int64
@@ -27,6 +31,7 @@ type HttpResult struct {
 	IPv6              *IpCheckResult
 	BrowserStatusCode *int
 	BrowserDiffers    *bool
+	WwwCheck          *WwwCheckResult
 }
 
 type TcpResult struct {

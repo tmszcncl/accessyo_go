@@ -53,6 +53,7 @@ func CheckHTTP(host string, aRecords []string, aaaaRecords []string) types.HttpR
 	}
 
 	browserResult := followRedirects(target, []string{}, time.Now(), browserUA)
+	wwwCheck := CheckWwwRedirect(host, mainResult.Redirects)
 
 	browserFinal := 0
 	if browserResult.StatusCode != nil {
@@ -65,7 +66,56 @@ func CheckHTTP(host string, aRecords []string, aaaaRecords []string) types.HttpR
 	mainResult.IPv6 = ipv6
 	mainResult.BrowserStatusCode = browserResult.StatusCode
 	mainResult.BrowserDiffers = &differs
+	mainResult.WwwCheck = &wwwCheck
 	return mainResult
+}
+
+func CheckWwwRedirect(host string, redirects []string) types.WwwCheckResult {
+	bare := bareHost(host)
+
+	isWww := strings.HasPrefix(bare, "www.")
+	withoutWww := bare
+	if isWww {
+		withoutWww = strings.TrimPrefix(bare, "www.")
+	}
+
+	apexParts := strings.Split(withoutWww, ".")
+	if len(apexParts) != 2 {
+		return types.WwwCheckResult{Kind: "skipped"}
+	}
+
+	apex := withoutWww
+	www := "www." + withoutWww
+
+	chain := make([]string, 0, len(redirects))
+	for _, u := range redirects {
+		chain = append(chain, bareHost(u))
+	}
+
+	if !isWww {
+		for _, h := range chain {
+			if h == www {
+				return types.WwwCheckResult{Kind: "apex→www"}
+			}
+		}
+	} else {
+		for _, h := range chain {
+			if h == apex {
+				return types.WwwCheckResult{Kind: "www→apex"}
+			}
+		}
+	}
+
+	counterpart := "https://" + www
+	if isWww {
+		counterpart = "https://" + apex
+	}
+	probe := quickCheck(counterpart, quickCheckOptions{})
+	if !probe.Ok {
+		return types.WwwCheckResult{Kind: "www-unreachable"}
+	}
+
+	return types.WwwCheckResult{Kind: "both-ok"}
 }
 
 func followRedirects(target string, chain []string, start time.Time, userAgent string) types.HttpResult {
@@ -272,4 +322,13 @@ func formatHTTPError(err error) string {
 	default:
 		return err.Error()
 	}
+}
+
+func bareHost(input string) string {
+	s := strings.TrimPrefix(input, "https://")
+	s = strings.TrimPrefix(s, "http://")
+	if i := strings.Index(s, "/"); i >= 0 {
+		s = s[:i]
+	}
+	return s
 }

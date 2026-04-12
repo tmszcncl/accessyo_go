@@ -336,6 +336,19 @@ func printHTTP(result *types.HttpResult, hideTiming bool) {
 		fmt.Printf("     %s server responds differently to browsers (status: %s vs %d)\n", yellow("->"), statusText, status)
 	}
 
+	if result.WwwCheck != nil {
+		kind := result.WwwCheck.Kind
+		if kind == "apex→www" {
+			fmt.Printf("     %s redirects to www (canonical: www)\n", dim("->"))
+		} else if kind == "www→apex" {
+			fmt.Printf("     %s redirects to apex (canonical: non-www)\n", dim("->"))
+		} else if kind == "both-ok" {
+			fmt.Printf("     %s www and non-www both serve content (no canonical redirect)\n", yellow("->"))
+		} else if kind == "www-unreachable" {
+			fmt.Printf("     %s www version unreachable - only one variant works\n", yellow("->"))
+		}
+	}
+
 	if result.DurationMs > 2000 {
 		fmt.Printf("     %s slow response (%dms)\n", yellow("->"), result.DurationMs)
 	}

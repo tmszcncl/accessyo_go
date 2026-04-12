@@ -85,6 +85,42 @@ func TestResolveRedirect(t *testing.T) {
 	})
 }
 
+func TestCheckWwwRedirect(t *testing.T) {
+	t.Run("detects apex→www redirect from chain", func(t *testing.T) {
+		result := CheckWwwRedirect("example.com", []string{
+			"https://example.com",
+			"https://www.example.com/",
+		})
+		if result.Kind != "apex→www" {
+			t.Fatalf("expected apex→www, got %q", result.Kind)
+		}
+	})
+
+	t.Run("detects www→apex redirect from chain", func(t *testing.T) {
+		result := CheckWwwRedirect("www.example.com", []string{
+			"https://www.example.com",
+			"https://example.com/",
+		})
+		if result.Kind != "www→apex" {
+			t.Fatalf("expected www→apex, got %q", result.Kind)
+		}
+	})
+
+	t.Run("returns skipped for plain subdomain (not www)", func(t *testing.T) {
+		result := CheckWwwRedirect("api.example.com", []string{})
+		if result.Kind != "skipped" {
+			t.Fatalf("expected skipped, got %q", result.Kind)
+		}
+	})
+
+	t.Run("returns skipped for localhost", func(t *testing.T) {
+		result := CheckWwwRedirect("localhost", []string{})
+		if result.Kind != "skipped" {
+			t.Fatalf("expected skipped, got %q", result.Kind)
+		}
+	})
+}
+
 func assertStringPtr(t *testing.T, got *string, want string) {
 	t.Helper()
 	if got == nil {
