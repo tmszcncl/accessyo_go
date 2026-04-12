@@ -7,6 +7,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,7 +29,10 @@ var keyHeaders = []string{
 	"cf-ray",
 	"cf-cache-status",
 	"x-powered-by",
+	"strict-transport-security",
 }
+
+var hstsMaxAgePattern = regexp.MustCompile(`max-age=(\d+)`)
 
 func CheckHTTP(host string, aRecords []string, aaaaRecords []string) types.HttpResult {
 	target := host
@@ -67,6 +72,10 @@ func CheckHTTP(host string, aRecords []string, aaaaRecords []string) types.HttpR
 	mainResult.BrowserStatusCode = browserResult.StatusCode
 	mainResult.BrowserDiffers = &differs
 	mainResult.WwwCheck = &wwwCheck
+	if hstsValue := mainResult.Headers["strict-transport-security"]; hstsValue != "" {
+		hsts := ParseHSTS(hstsValue)
+		mainResult.HSTS = &hsts
+	}
 	return mainResult
 }
 
@@ -261,6 +270,24 @@ func DetectBlock(status int, headers map[string]string) *string {
 		return strPtr("server-side")
 	}
 	return nil
+}
+
+func ParseHSTS(value string) types.HstsInfo {
+	lowered := strings.ToLower(value)
+	maxAge := 0
+	match := hstsMaxAgePattern.FindStringSubmatch(lowered)
+	if len(match) >= 2 {
+		if parsed, err := strconv.Atoi(match[1]); err == nil {
+			maxAge = parsed
+		}
+	}
+
+	return types.HstsInfo{
+		Raw:               value,
+		MaxAge:            maxAge,
+		IncludeSubDomains: strings.Contains(lowered, "includesubdomains"),
+		Preload:           strings.Contains(lowered, "preload"),
+	}
 }
 
 type quickCheckOptions struct {

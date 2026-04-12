@@ -271,15 +271,43 @@ func printHTTP(result *types.HttpResult, hideTiming bool) {
 	}
 
 	if len(result.Headers) > 0 {
-		fmt.Printf("     %s\n", dim("headers:"))
 		keys := make([]string, 0, len(result.Headers))
 		for key := range result.Headers {
+			if key == "strict-transport-security" {
+				continue
+			}
 			keys = append(keys, key)
 		}
-		sort.Strings(keys)
-		for _, key := range keys {
-			fmt.Printf("       %s %s\n", dim(key+":"), result.Headers[key])
+		if len(keys) > 0 {
+			fmt.Printf("     %s\n", dim("headers:"))
+			sort.Strings(keys)
+			for _, key := range keys {
+				fmt.Printf("       %s %s\n", dim(key+":"), result.Headers[key])
+			}
 		}
+	}
+
+	if result.HSTS != nil {
+		days := result.HSTS.MaxAge / 86400
+		ageLabel := fmt.Sprintf("%ds", result.HSTS.MaxAge)
+		if days >= 1 {
+			ageLabel = fmt.Sprintf("%dd", days)
+		}
+		tooShort := result.HSTS.MaxAge < 180*86400
+		extras := ""
+		if result.HSTS.IncludeSubDomains {
+			extras += " - includeSubDomains"
+		}
+		if result.HSTS.Preload {
+			extras += " - preload"
+		}
+		if tooShort {
+			fmt.Printf("     %s    %s\n", dim("hsts:"), yellow("⚠ max-age "+ageLabel+" - increase to >= 180d"))
+		} else {
+			fmt.Printf("     %s    %s\n", dim("hsts:"), green("✓ max-age "+ageLabel+extras))
+		}
+	} else {
+		fmt.Printf("     %s    %s\n", dim("hsts:"), yellow("✗ not set - site can be downgraded to HTTP"))
 	}
 
 	if result.IPv4 != nil || result.IPv6 != nil {

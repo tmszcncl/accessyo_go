@@ -121,6 +121,66 @@ func TestCheckWwwRedirect(t *testing.T) {
 	})
 }
 
+func TestParseHSTS(t *testing.T) {
+	t.Run("parses max-age", func(t *testing.T) {
+		result := ParseHSTS("max-age=31536000")
+		if result.MaxAge != 31536000 {
+			t.Fatalf("expected max-age 31536000, got %d", result.MaxAge)
+		}
+		if result.IncludeSubDomains {
+			t.Fatalf("expected includeSubDomains false")
+		}
+		if result.Preload {
+			t.Fatalf("expected preload false")
+		}
+	})
+
+	t.Run("parses includeSubDomains", func(t *testing.T) {
+		result := ParseHSTS("max-age=31536000; includeSubDomains")
+		if !result.IncludeSubDomains {
+			t.Fatalf("expected includeSubDomains true")
+		}
+		if result.Preload {
+			t.Fatalf("expected preload false")
+		}
+	})
+
+	t.Run("parses preload", func(t *testing.T) {
+		result := ParseHSTS("max-age=31536000; includeSubDomains; preload")
+		if !result.IncludeSubDomains {
+			t.Fatalf("expected includeSubDomains true")
+		}
+		if !result.Preload {
+			t.Fatalf("expected preload true")
+		}
+	})
+
+	t.Run("is case-insensitive", func(t *testing.T) {
+		result := ParseHSTS("max-age=31536000; IncludeSubDomains; Preload")
+		if !result.IncludeSubDomains {
+			t.Fatalf("expected includeSubDomains true")
+		}
+		if !result.Preload {
+			t.Fatalf("expected preload true")
+		}
+	})
+
+	t.Run("returns max-age 0 when missing", func(t *testing.T) {
+		result := ParseHSTS("includeSubDomains")
+		if result.MaxAge != 0 {
+			t.Fatalf("expected max-age 0, got %d", result.MaxAge)
+		}
+	})
+
+	t.Run("preserves raw value", func(t *testing.T) {
+		raw := "max-age=31536000; includeSubDomains"
+		result := ParseHSTS(raw)
+		if result.Raw != raw {
+			t.Fatalf("expected raw %q, got %q", raw, result.Raw)
+		}
+	})
+}
+
 func assertStringPtr(t *testing.T, got *string, want string) {
 	t.Helper()
 	if got == nil {

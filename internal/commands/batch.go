@@ -13,22 +13,23 @@ type batchResult struct {
 	host     string
 	ok       bool
 	failedAt string
+	warnings []string
 }
 
 func checkOne(host string) batchResult {
 	dns := checks.CheckDNS(host, defaultTimeoutMs)
 	if !dns.Ok {
-		return batchResult{host: host, ok: false, failedAt: "DNS"}
+		return batchResult{host: host, ok: false, failedAt: "DNS", warnings: []string{}}
 	}
 
 	tcp := checks.CheckTCP(host, 443, defaultTimeoutMs)
 	if !tcp.Ok {
-		return batchResult{host: host, ok: false, failedAt: "TCP"}
+		return batchResult{host: host, ok: false, failedAt: "TCP", warnings: []string{}}
 	}
 
 	tls := checks.CheckTLS(host, 443, defaultTimeoutMs)
 	if !tls.Ok {
-		return batchResult{host: host, ok: false, failedAt: "TLS"}
+		return batchResult{host: host, ok: false, failedAt: "TLS", warnings: []string{}}
 	}
 
 	http := checks.CheckHTTP(host, dns.ARecords, dns.AaaaRecords)
@@ -37,10 +38,27 @@ func checkOne(host string) batchResult {
 		if http.StatusCode != nil {
 			code = fmt.Sprintf(" %d", *http.StatusCode)
 		}
-		return batchResult{host: host, ok: false, failedAt: "HTTP" + code}
+		return batchResult{host: host, ok: false, failedAt: "HTTP" + code, warnings: []string{}}
 	}
 
-	return batchResult{host: host, ok: true}
+	warnings := make([]string, 0)
+	if http.HSTS == nil {
+		warnings = append(warnings, "HSTS")
+	} else if http.HSTS.MaxAge < 180*86400 {
+		days := http.HSTS.MaxAge / 86400
+		warnings = append(warnings, fmt.Sprintf("HSTS short (%dd)", days))
+	}
+	if tls.CertDaysRemaining != nil && *tls.CertDaysRemaining < 30 {
+		warnings = append(warnings, fmt.Sprintf("cert %dd", *tls.CertDaysRemaining))
+	}
+	if http.IPv6 != nil && !http.IPv6.Ok {
+		warnings = append(warnings, "IPv6")
+	}
+	if http.DurationMs > 2000 {
+		warnings = append(warnings, fmt.Sprintf("slow %dms", http.DurationMs))
+	}
+
+	return batchResult{host: host, ok: true, warnings: warnings}
 }
 
 func Batch(hosts []string) error {
@@ -54,14 +72,25 @@ func Batch(hosts []string) error {
 	}
 
 	resultText := func(r batchResult) string {
+		status := ""
 		if r.ok {
-			return green("✓ WORKING")
+			status = green("✓ WORKING")
+		} else {
+			reason := ""
+			if r.failedAt != "" {
+				reason = dim(" (" + r.failedAt + ")")
+			}
+			status = red("✗ NOT WORKING") + reason
 		}
-		reason := ""
-		if r.failedAt != "" {
-			reason = dim(" (" + r.failedAt + ")")
+
+		if len(r.warnings) == 0 {
+			return status
 		}
-		return red("✗ NOT WORKING") + reason
+		warns := make([]string, 0, len(r.warnings))
+		for _, warning := range r.warnings {
+			warns = append(warns, yellow("⚠ "+warning))
+		}
+		return status + "  " + strings.Join(warns, " ")
 	}
 
 	results := make([]batchResult, len(hosts))

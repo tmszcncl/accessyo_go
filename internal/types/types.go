@@ -18,6 +18,13 @@ type WwwCheckResult struct {
 	Kind string
 }
 
+type HstsInfo struct {
+	Raw               string
+	MaxAge            int
+	IncludeSubDomains bool
+	Preload           bool
+}
+
 type HttpResult struct {
 	Ok                bool
 	DurationMs        int64
@@ -32,6 +39,7 @@ type HttpResult struct {
 	BrowserStatusCode *int
 	BrowserDiffers    *bool
 	WwwCheck          *WwwCheckResult
+	HSTS              *HstsInfo
 }
 
 type TcpResult struct {
