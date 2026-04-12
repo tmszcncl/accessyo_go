@@ -5,7 +5,7 @@
 [![CI](https://github.com/tmszcncl/accessyo_go/actions/workflows/ci.yml/badge.svg)](https://github.com/tmszcncl/accessyo_go/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> Work in progress. First scaffold commit.
+> Work in progress.
 
 ---
 
@@ -30,14 +30,24 @@ Accessyo does.
 
 ## Status
 
-This repository is in early development. Current scope is project scaffold only:
+The CLI is in active development. Currently supports:
 
-- Go module + CLI entrypoint
-- GitHub Actions CI
-- Tag-based binary release workflow
-- Project structure for upcoming network checks
+- DNS resolution (A + AAAA records, TTL placeholder, resolver info, CDN detection)
+- TCP connectivity check
+- TLS handshake (protocol, cipher, certificate info)
+- HTTP request (status, redirects, key headers, basic block detection)
 
-Functional diagnostics are being built in the next commits.
+Run locally:
+
+```bash
+go run ./cmd/accessyo example.com
+```
+
+Alternative command form:
+
+```bash
+go run ./cmd/accessyo diagnose example.com
+```
 
 ---
 
