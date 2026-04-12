@@ -3,6 +3,7 @@ package commands
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -316,9 +317,11 @@ func printHTTP(result *types.HttpResult, hideTiming bool) {
 
 	if len(result.Redirects) > 0 {
 		fmt.Printf("     %s\n", dim("redirects:"))
-		for _, target := range result.Redirects[1:] {
-			fmt.Printf("       %s %s\n", dim("->"), dim(target))
+		labels := make([]string, 0, len(result.Redirects))
+		for _, raw := range result.Redirects {
+			labels = append(labels, redirectStepLabel(raw))
 		}
+		fmt.Printf("       %s %s\n", dim("chain:"), dim(strings.Join(labels, " -> ")))
 	} else {
 		fmt.Printf("     %s\n", dim("(no redirects)"))
 	}
@@ -479,6 +482,23 @@ func statusLabel(code int) string {
 	default:
 		return ""
 	}
+}
+
+func redirectStepLabel(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return rawURL
+	}
+
+	path := parsed.EscapedPath()
+	if path == "" {
+		path = "/"
+	}
+	query := ""
+	if parsed.RawQuery != "" {
+		query = "?" + parsed.RawQuery
+	}
+	return parsed.Scheme + "://" + parsed.Host + path + query
 }
 
 func printSummary(input summary.Input) {
