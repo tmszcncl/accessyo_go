@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tmszcncl/accessyo_go/internal/types"
@@ -59,15 +60,34 @@ func CheckHTTPWithTimeout(host string, aRecords []string, aaaaRecords []string, 
 
 	var ipv4 *types.IpCheckResult
 	var ipv6 *types.IpCheckResult
+	var browserResult types.HttpResult
+	var wwwCheck types.WwwCheckResult
+
+	var wg sync.WaitGroup
 	if bothFamilies {
-		v4 := quickCheck(target, quickCheckOptions{family: 4, userAgent: accessyoUA, timeoutMs: timeoutMs})
-		v6 := quickCheck(target, quickCheckOptions{family: 6, userAgent: accessyoUA, timeoutMs: timeoutMs})
-		ipv4 = &v4
-		ipv6 = &v6
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			v4 := quickCheck(target, quickCheckOptions{family: 4, userAgent: accessyoUA, timeoutMs: timeoutMs})
+			ipv4 = &v4
+		}()
+		go func() {
+			defer wg.Done()
+			v6 := quickCheck(target, quickCheckOptions{family: 6, userAgent: accessyoUA, timeoutMs: timeoutMs})
+			ipv6 = &v6
+		}()
 	}
 
-	browserResult := followRedirects(target, []string{}, time.Now(), browserUA, timeoutMs)
-	wwwCheck := CheckWwwRedirect(host, mainResult.Redirects)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		browserResult = followRedirects(target, []string{}, time.Now(), browserUA, timeoutMs)
+	}()
+	go func() {
+		defer wg.Done()
+		wwwCheck = CheckWwwRedirect(host, mainResult.Redirects)
+	}()
+	wg.Wait()
 
 	browserFinal := 0
 	if browserResult.StatusCode != nil {
