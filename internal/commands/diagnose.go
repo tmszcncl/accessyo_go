@@ -14,7 +14,7 @@ import (
 
 const defaultTimeoutMs = 5000
 
-func Diagnose(host string, port int, timeoutMs int, jsonOutput bool) error {
+func Diagnose(host string, port int, timeoutMs int, jsonOutput bool) (bool, error) {
 	if timeoutMs <= 0 {
 		timeoutMs = defaultTimeoutMs
 	}
@@ -24,10 +24,10 @@ func Diagnose(host string, port int, timeoutMs int, jsonOutput bool) error {
 		out := buildJSONOutput(host, dns, tcp, tls, httpResult)
 		encoded, err := json.MarshalIndent(out, "", "  ")
 		if err != nil {
-			return err
+			return false, err
 		}
 		fmt.Println(string(encoded))
-		return nil
+		return out.Summary.OK, nil
 	}
 
 	fmt.Println()
@@ -40,7 +40,7 @@ func Diagnose(host string, port int, timeoutMs int, jsonOutput bool) error {
 	return diagnoseHost(host, port, nil, timeoutMs)
 }
 
-func diagnoseHost(host string, port int, displayHosts []string, timeoutMs int) error {
+func diagnoseHost(host string, port int, displayHosts []string, timeoutMs int) (bool, error) {
 	if timeoutMs <= 0 {
 		timeoutMs = defaultTimeoutMs
 	}
@@ -97,7 +97,13 @@ func diagnoseHost(host string, port int, displayHosts []string, timeoutMs int) e
 	})
 	fmt.Println()
 
-	return nil
+	result := summary.Build(summary.Input{
+		DNS:  dnsResult,
+		TCP:  tcpResult,
+		TLS:  tlsResult,
+		HTTP: httpResult,
+	})
+	return result.AllOK, nil
 }
 
 func printNetworkContext(ctx types.NetworkContext) {

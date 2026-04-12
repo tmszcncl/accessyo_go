@@ -16,6 +16,7 @@ func main() {
 		os.Exit(2)
 	}
 
+	ok := true
 	var err error
 	if args[0] == "diagnose" {
 		timeout, jsonOutput, remaining, parseErr := parseOptions(args[1:])
@@ -27,7 +28,7 @@ func main() {
 			printUsage()
 			os.Exit(2)
 		}
-		err = commands.Diagnose(remaining[0], 443, timeout, jsonOutput)
+		ok, err = commands.Diagnose(remaining[0], 443, timeout, jsonOutput)
 	} else {
 		timeout, jsonOutput, remaining, parseErr := parseOptions(args)
 		if parseErr != nil {
@@ -39,14 +40,17 @@ func main() {
 			os.Exit(2)
 		}
 		if len(remaining) == 1 {
-			err = commands.Diagnose(remaining[0], 443, timeout, jsonOutput)
+			ok, err = commands.Diagnose(remaining[0], 443, timeout, jsonOutput)
 		} else {
-			err = commands.Batch(remaining, timeout, jsonOutput)
+			ok, err = commands.Batch(remaining, timeout, jsonOutput)
 		}
 	}
 
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	if !ok {
 		os.Exit(1)
 	}
 }

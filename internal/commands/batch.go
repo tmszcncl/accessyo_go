@@ -94,7 +94,7 @@ func runChecks(host string, timeoutMs int) (types.DnsResult, *types.TcpResult, *
 	return dns, tcp, tls, httpResult
 }
 
-func Batch(hosts []string, timeoutMs int, jsonOutput bool) error {
+func Batch(hosts []string, timeoutMs int, jsonOutput bool) (bool, error) {
 	if timeoutMs <= 0 {
 		timeoutMs = defaultTimeoutMs
 	}
@@ -114,10 +114,17 @@ func Batch(hosts []string, timeoutMs int, jsonOutput bool) error {
 
 		encoded, err := json.MarshalIndent(outputs, "", "  ")
 		if err != nil {
-			return err
+			return false, err
 		}
 		fmt.Println(string(encoded))
-		return nil
+		allOK := true
+		for _, out := range outputs {
+			if !out.Summary.OK {
+				allOK = false
+				break
+			}
+		}
+		return allOK, nil
 	}
 
 	fmt.Println()
@@ -245,14 +252,14 @@ func Batch(hosts []string, timeoutMs int, jsonOutput bool) error {
 				displayHosts = append(displayHosts, result.host)
 			}
 			if len(group) > 0 {
-				if err := diagnoseHost(group[0].host, 443, displayHosts, timeoutMs); err != nil {
-					return err
+				if _, err := diagnoseHost(group[0].host, 443, displayHosts, timeoutMs); err != nil {
+					return false, err
 				}
 			}
 		}
 	}
 
-	return nil
+	return failing == 0, nil
 }
 
 func updateRow(hosts []string, maxLen int, index int, text string) {
