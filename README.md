@@ -32,10 +32,11 @@ Accessyo does.
 
 The CLI is in active development. Currently supports:
 
-- DNS resolution (A + AAAA records, TTL placeholder, resolver info, CDN detection)
+- Network context (public IP, country, DNS resolver, IPv6 availability)
+- DNS resolution (A + AAAA records, TTL, resolver, CDN detection)
 - TCP connectivity check
-- TLS handshake (protocol, cipher, certificate info)
-- HTTP request (status, redirects, key headers, basic block detection)
+- TLS handshake (protocol, cipher, certificate info + expiry)
+- HTTP request (status, redirects, IPv4/IPv6, browser UA comparison, CDN detection, WAF blocking)
 
 Run locally:
 
