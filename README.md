@@ -9,6 +9,7 @@
 
 🌐 [accessyo.com](https://accessyo.com)
 📦 [GitHub repository](https://github.com/tmszcncl/accessyo_go)
+⬇️ [Download binaries (latest release)](https://github.com/tmszcncl/accessyo_go/releases/latest)
 
 ---
 
@@ -55,6 +56,11 @@ Multiple domains (compact summary + auto-details for failures):
 ```bash
 go run ./cmd/accessyo example.com api.example.com cdn.example.com
 ```
+
+Download prebuilt binaries from GitHub Releases:
+
+- https://github.com/tmszcncl/accessyo_go/releases
+- https://github.com/tmszcncl/accessyo_go/releases/latest
 
 Options:
 
