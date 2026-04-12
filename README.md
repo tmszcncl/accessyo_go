@@ -35,7 +35,7 @@ The CLI is in active development. Currently supports:
 - Network context (public IP, country, DNS resolver)
 - DNS resolution (A + AAAA records, TTL, resolver)
 - TCP connectivity check
-- TLS handshake (protocol, cipher, certificate info + expiry)
+- TLS handshake (protocol, cipher, certificate info + expiry, HTTP/2 via ALPN)
 - HTTP request (status, redirects, IPv4/IPv6, browser UA comparison, CDN detection, WAF blocking, www/non-www canonical check)
 - Batch mode - check multiple domains at once
 

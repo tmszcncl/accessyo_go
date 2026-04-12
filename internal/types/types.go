@@ -46,6 +46,7 @@ type TlsResult struct {
 	DurationMs        int64
 	Protocol          *string
 	Cipher            *string
+	AlpnProtocol      *string
 	CertIssuer        *string
 	CertValidTo       *string
 	CertExpired       *bool

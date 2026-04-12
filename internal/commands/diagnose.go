@@ -194,6 +194,13 @@ func printTLS(result *types.TlsResult, hideTiming bool) {
 	if result.Cipher != nil {
 		fmt.Printf("     %s   %s\n", dim("cipher:"), *result.Cipher)
 	}
+	if result.AlpnProtocol != nil {
+		label := dim("HTTP/1.1")
+		if *result.AlpnProtocol == "h2" {
+			label = green("HTTP/2")
+		}
+		fmt.Printf("     %s    %s\n", dim("ALPN:"), label)
+	}
 	if result.CertIssuer != nil || result.CertValidTo != nil {
 		fmt.Printf("     %s\n", dim("cert:"))
 		if result.CertIssuer != nil {

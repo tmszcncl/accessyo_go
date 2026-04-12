@@ -14,9 +14,7 @@ func CheckTLS(host string, port int, timeoutMs int) types.TlsResult {
 	start := time.Now()
 
 	dialer := &net.Dialer{Timeout: time.Duration(timeoutMs) * time.Millisecond}
-	conn, err := tls.DialWithDialer(dialer, "tcp", net.JoinHostPort(host, strconv.Itoa(port)), &tls.Config{
-		ServerName: host,
-	})
+	conn, err := tls.DialWithDialer(dialer, "tcp", net.JoinHostPort(host, strconv.Itoa(port)), newTLSConfig(host))
 	if err != nil {
 		message := formatTLSError(err)
 		return types.TlsResult{
@@ -32,10 +30,11 @@ func CheckTLS(host string, port int, timeoutMs int) types.TlsResult {
 	cipherName := tls.CipherSuiteName(state.CipherSuite)
 
 	result := types.TlsResult{
-		Ok:         true,
-		DurationMs: elapsedMs(start),
-		Protocol:   &protocol,
-		Cipher:     &cipherName,
+		Ok:           true,
+		DurationMs:   elapsedMs(start),
+		Protocol:     &protocol,
+		Cipher:       &cipherName,
+		AlpnProtocol: negotiatedALPN(state),
 	}
 
 	if len(state.PeerCertificates) > 0 {
@@ -58,6 +57,20 @@ func CheckTLS(host string, port int, timeoutMs int) types.TlsResult {
 	}
 
 	return result
+}
+
+func newTLSConfig(host string) *tls.Config {
+	return &tls.Config{
+		ServerName: host,
+		NextProtos: []string{"h2", "http/1.1"},
+	}
+}
+
+func negotiatedALPN(state tls.ConnectionState) *string {
+	if state.NegotiatedProtocol == "" {
+		return nil
+	}
+	return strPtr(state.NegotiatedProtocol)
 }
 
 func tlsVersionName(version uint16) string {
