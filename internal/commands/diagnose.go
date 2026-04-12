@@ -34,7 +34,7 @@ func Diagnose(host string, port int) error {
 
 	var httpResult *types.HttpResult
 	if (tlsResult != nil && tlsResult.Ok) || (tlsResult == nil && tcpResult != nil && tcpResult.Ok) {
-		r := checks.CheckHTTP(host)
+		r := checks.CheckHTTP(host, dnsResult.ARecords, dnsResult.AaaaRecords)
 		httpResult = &r
 	}
 
@@ -157,6 +157,14 @@ func printTLS(result *types.TlsResult) {
 		}
 	}
 	fmt.Printf("     %s TLS handshake successful\n", dim("->"))
+
+	if result.CertExpired != nil && *result.CertExpired {
+		fmt.Printf("     %s certificate expired\n", red("->"))
+	} else if result.CertDaysRemaining != nil && *result.CertDaysRemaining < 14 {
+		fmt.Printf("     %s certificate expiring soon (~%d days remaining)\n", yellow("->"), *result.CertDaysRemaining)
+	} else if result.CertDaysRemaining != nil {
+		fmt.Printf("     %s certificate valid (~%d days remaining)\n", dim("->"), *result.CertDaysRemaining)
+	}
 }
 
 func printHTTP(result *types.HttpResult) {
@@ -172,8 +180,10 @@ func printHTTP(result *types.HttpResult) {
 			block = " (" + *result.BlockedBy + ")"
 		}
 		fmt.Printf("  %s  HTTP%s  %s\n\n", red("✗"), block, duration)
-		if result.BlockedBy != nil {
-			fmt.Printf("     %s\n", red("Request blocked by CDN / WAF"))
+		if result.BlockedBy != nil && *result.BlockedBy == "Cloudflare" {
+			fmt.Printf("     %s\n", red("Request blocked by Cloudflare / WAF"))
+		} else if result.BlockedBy != nil && *result.BlockedBy == "server-side" {
+			fmt.Printf("     %s\n", red("Request blocked (server-side 403)"))
 		} else {
 			status := "error"
 			if result.StatusCode != nil {
@@ -208,6 +218,28 @@ func printHTTP(result *types.HttpResult) {
 		}
 	}
 
+	if result.IPv4 != nil || result.IPv6 != nil {
+		fmt.Printf("     %s\n", dim("connectivity:"))
+		if result.IPv4 != nil {
+			icon := red("✗")
+			text := red("FAIL")
+			if result.IPv4.Ok {
+				icon = green("✓")
+				text = green("OK")
+			}
+			fmt.Printf("       %s %s %s\n", dim("IPv4:"), icon, text)
+		}
+		if result.IPv6 != nil {
+			icon := red("✗")
+			text := red("FAIL")
+			if result.IPv6.Ok {
+				icon = green("✓")
+				text = green("OK")
+			}
+			fmt.Printf("       %s %s %s\n", dim("IPv6:"), icon, text)
+		}
+	}
+
 	status := 0
 	if result.StatusCode != nil {
 		status = *result.StatusCode
@@ -215,10 +247,36 @@ func printHTTP(result *types.HttpResult) {
 
 	if status >= 200 && status < 300 {
 		fmt.Printf("     %s HTTP OK\n", dim("->"))
+	} else if status >= 300 && status < 400 {
+		fmt.Printf("     %s redirects detected\n", dim("->"))
+	} else if status == 403 || status == 503 {
+		fmt.Printf("     %s request blocked (possible CDN / WAF)\n", yellow("->"))
+	} else if status == 404 {
+		fmt.Printf("     %s page not found\n", yellow("->"))
 	} else if status >= 400 && status < 500 {
 		fmt.Printf("     %s client error - possible access restriction\n", yellow("->"))
 	} else if status >= 500 {
 		fmt.Printf("     %s server error\n", red("->"))
+	}
+
+	if result.CDN != nil {
+		fmt.Printf("     %s served via %s\n", dim("->"), *result.CDN)
+	}
+
+	if result.IPv6 != nil && !result.IPv6.Ok {
+		fmt.Printf("     %s IPv6 connectivity issue\n", yellow("->"))
+	}
+
+	if result.BrowserDiffers != nil && *result.BrowserDiffers {
+		statusText := "?"
+		if result.BrowserStatusCode != nil {
+			statusText = fmt.Sprintf("%d", *result.BrowserStatusCode)
+		}
+		fmt.Printf("     %s server responds differently to browsers (status: %s vs %d)\n", yellow("->"), statusText, status)
+	}
+
+	if result.DurationMs > 2000 {
+		fmt.Printf("     %s slow response (%dms)\n", yellow("->"), result.DurationMs)
 	}
 }
 

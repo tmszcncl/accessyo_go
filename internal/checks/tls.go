@@ -51,8 +51,10 @@ func CheckTLS(host string, port int, timeoutMs int) types.TlsResult {
 
 		validTo := cert.NotAfter.UTC().Format(time.RFC1123)
 		expired := cert.NotAfter.Before(time.Now())
+		daysRemaining := int(cert.NotAfter.Sub(time.Now()).Hours() / 24)
 		result.CertValidTo = &validTo
 		result.CertExpired = &expired
+		result.CertDaysRemaining = &daysRemaining
 	}
 
 	return result

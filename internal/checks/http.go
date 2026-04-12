@@ -4,9 +4,9 @@ import (
 	"context"
 	"crypto/tls"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
-	"sort"
 	"strings"
 	"time"
 
@@ -16,6 +16,8 @@ import (
 const (
 	maxRedirects = 5
 	httpTimeout  = 5000
+	accessyoUA   = "accessyo/0.1 (+https://github.com/tmszcncl/accessyo_npx)"
+	browserUA    = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
 
 var keyHeaders = []string{
@@ -27,16 +29,46 @@ var keyHeaders = []string{
 	"x-powered-by",
 }
 
-func CheckHTTP(host string) types.HttpResult {
+func CheckHTTP(host string, aRecords []string, aaaaRecords []string) types.HttpResult {
 	target := host
 	if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
 		target = "https://" + target
 	}
 
-	return followRedirects(target, []string{}, time.Now())
+	start := time.Now()
+	mainResult := followRedirects(target, []string{}, start, accessyoUA)
+	if mainResult.StatusCode == nil {
+		return mainResult
+	}
+
+	bothFamilies := len(aRecords) > 0 && len(aaaaRecords) > 0
+
+	var ipv4 *types.IpCheckResult
+	var ipv6 *types.IpCheckResult
+	if bothFamilies {
+		v4 := quickCheck(target, quickCheckOptions{family: 4})
+		v6 := quickCheck(target, quickCheckOptions{family: 6})
+		ipv4 = &v4
+		ipv6 = &v6
+	}
+
+	browserResult := followRedirects(target, []string{}, time.Now(), browserUA)
+
+	browserFinal := 0
+	if browserResult.StatusCode != nil {
+		browserFinal = *browserResult.StatusCode
+	}
+	mainFinal := *mainResult.StatusCode
+	differs := browserFinal >= 400 && mainFinal < 400
+
+	mainResult.IPv4 = ipv4
+	mainResult.IPv6 = ipv6
+	mainResult.BrowserStatusCode = browserResult.StatusCode
+	mainResult.BrowserDiffers = &differs
+	return mainResult
 }
 
-func followRedirects(target string, chain []string, start time.Time) types.HttpResult {
+func followRedirects(target string, chain []string, start time.Time, userAgent string) types.HttpResult {
 	if len(chain) > maxRedirects {
 		message := "Too many redirects (redirect loop)"
 		return types.HttpResult{
@@ -47,6 +79,8 @@ func followRedirects(target string, chain []string, start time.Time) types.HttpR
 			Error:      &message,
 		}
 	}
+
+	client := newHTTPClient(0)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(httpTimeout)*time.Millisecond)
 	defer cancel()
@@ -62,16 +96,7 @@ func followRedirects(target string, chain []string, start time.Time) types.HttpR
 			Error:      &message,
 		}
 	}
-
-	client := &http.Client{
-		Timeout: time.Duration(httpTimeout) * time.Millisecond,
-		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
-		},
-	}
+	req.Header.Set("User-Agent", userAgent)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -93,12 +118,13 @@ func followRedirects(target string, chain []string, start time.Time) types.HttpR
 	if statusCode >= 300 && statusCode < 400 {
 		location := resp.Header.Get("Location")
 		if location != "" {
-			next := resolveRedirect(target, location)
-			return followRedirects(next, append(chain, target), start)
+			next := ResolveRedirect(target, location)
+			return followRedirects(next, append(chain, target), start, userAgent)
 		}
 	}
 
-	blockedBy := detectBlock(statusCode, filteredHeaders)
+	blockedBy := DetectBlock(statusCode, filteredHeaders)
+	cdn := DetectCdn(filteredHeaders)
 	ok := statusCode >= 200 && statusCode < 500 && blockedBy == nil
 
 	return types.HttpResult{
@@ -108,6 +134,32 @@ func followRedirects(target string, chain []string, start time.Time) types.HttpR
 		Redirects:  chain,
 		Headers:    filteredHeaders,
 		BlockedBy:  blockedBy,
+		CDN:        cdn,
+	}
+}
+
+func newHTTPClient(family int) *http.Client {
+	dialer := &net.Dialer{Timeout: time.Duration(httpTimeout) * time.Millisecond}
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
+	}
+
+	if family == 4 || family == 6 {
+		network := "tcp4"
+		if family == 6 {
+			network = "tcp6"
+		}
+		transport.DialContext = func(ctx context.Context, _, addr string) (net.Conn, error) {
+			return dialer.DialContext(ctx, network, addr)
+		}
+	}
+
+	return &http.Client{
+		Timeout: time.Duration(httpTimeout) * time.Millisecond,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+		Transport: transport,
 	}
 }
 
@@ -121,7 +173,7 @@ func extractHeaders(headers http.Header) map[string]string {
 	return result
 }
 
-func resolveRedirect(baseURL string, location string) string {
+func ResolveRedirect(baseURL string, location string) string {
 	if strings.HasPrefix(location, "http://") || strings.HasPrefix(location, "https://") {
 		return location
 	}
@@ -133,13 +185,60 @@ func resolveRedirect(baseURL string, location string) string {
 	return parsed.Scheme + "://" + parsed.Host + location
 }
 
-func detectBlock(status int, headers map[string]string) *string {
+func DetectCdn(headers map[string]string) *string {
 	server := strings.ToLower(headers["server"])
-	isCloudflare := headers["cf-ray"] != "" || headers["cf-cache-status"] != "" || strings.Contains(server, "cloudflare")
-	if isCloudflare && (status == 403 || status == 503) {
+	if headers["cf-ray"] != "" || headers["cf-cache-status"] != "" || strings.Contains(server, "cloudflare") {
 		return strPtr("Cloudflare")
 	}
 	return nil
+}
+
+func DetectBlock(status int, headers map[string]string) *string {
+	cdn := DetectCdn(headers)
+	if cdn != nil && (status == 403 || status == 503) {
+		return cdn
+	}
+	if status == 403 {
+		return strPtr("server-side")
+	}
+	return nil
+}
+
+type quickCheckOptions struct {
+	family int
+}
+
+func quickCheck(target string, options quickCheckOptions) types.IpCheckResult {
+	client := newHTTPClient(options.family)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(httpTimeout)*time.Millisecond)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		message := err.Error()
+		return types.IpCheckResult{Ok: false, Error: &message}
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		message := strings.ToLower(err.Error())
+		if strings.Contains(message, "timeout") || strings.Contains(message, "deadline exceeded") {
+			timeout := "timeout"
+			return types.IpCheckResult{Ok: false, Error: &timeout}
+		}
+		original := err.Error()
+		return types.IpCheckResult{Ok: false, Error: &original}
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	statusCode := resp.StatusCode
+	ok := statusCode >= 200 && statusCode < 400
+	return types.IpCheckResult{
+		Ok:         ok,
+		StatusCode: &statusCode,
+	}
 }
 
 func formatHTTPError(err error) string {
@@ -162,13 +261,4 @@ func formatHTTPError(err error) string {
 	default:
 		return err.Error()
 	}
-}
-
-func sortedHeaderKeys(headers map[string]string) []string {
-	keys := make([]string, 0, len(headers))
-	for key := range headers {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }

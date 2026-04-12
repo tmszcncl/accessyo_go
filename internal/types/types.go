@@ -1,13 +1,24 @@
 package types
 
-type HttpResult struct {
+type IpCheckResult struct {
 	Ok         bool
-	DurationMs int64
 	StatusCode *int
-	Redirects  []string
-	Headers    map[string]string
 	Error      *string
-	BlockedBy  *string
+}
+
+type HttpResult struct {
+	Ok                bool
+	DurationMs        int64
+	StatusCode        *int
+	Redirects         []string
+	Headers           map[string]string
+	Error             *string
+	BlockedBy         *string
+	CDN               *string
+	IPv4              *IpCheckResult
+	IPv6              *IpCheckResult
+	BrowserStatusCode *int
+	BrowserDiffers    *bool
 }
 
 type TcpResult struct {
@@ -18,14 +29,15 @@ type TcpResult struct {
 }
 
 type TlsResult struct {
-	Ok          bool
-	DurationMs  int64
-	Protocol    *string
-	Cipher      *string
-	CertIssuer  *string
-	CertValidTo *string
-	CertExpired *bool
-	Error       *string
+	Ok                bool
+	DurationMs        int64
+	Protocol          *string
+	Cipher            *string
+	CertIssuer        *string
+	CertValidTo       *string
+	CertExpired       *bool
+	CertDaysRemaining *int
+	Error             *string
 }
 
 type DnsResult struct {
