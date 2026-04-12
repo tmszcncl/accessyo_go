@@ -5,12 +5,12 @@ type NetworkContext struct {
 	Country       *string
 	ResolverIP    string
 	ResolverLabel *string
-	IPv6Available bool
 }
 
 type IpCheckResult struct {
 	Ok         bool
 	StatusCode *int
+	DurationMs int64
 	Error      *string
 }
 

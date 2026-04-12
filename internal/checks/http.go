@@ -131,11 +131,20 @@ func followRedirects(target string, chain []string, start time.Time, userAgent s
 		Ok:         ok,
 		DurationMs: elapsedMs(start),
 		StatusCode: &statusCode,
-		Redirects:  chain,
+		Redirects:  redirectsWithFinal(chain, target),
 		Headers:    filteredHeaders,
 		BlockedBy:  blockedBy,
 		CDN:        cdn,
 	}
+}
+
+func redirectsWithFinal(chain []string, finalURL string) []string {
+	if len(chain) == 0 {
+		return []string{}
+	}
+	out := append([]string{}, chain...)
+	out = append(out, finalURL)
+	return out
 }
 
 func newHTTPClient(family int) *http.Client {
@@ -209,6 +218,7 @@ type quickCheckOptions struct {
 }
 
 func quickCheck(target string, options quickCheckOptions) types.IpCheckResult {
+	start := time.Now()
 	client := newHTTPClient(options.family)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(httpTimeout)*time.Millisecond)
@@ -217,7 +227,7 @@ func quickCheck(target string, options quickCheckOptions) types.IpCheckResult {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
 		message := err.Error()
-		return types.IpCheckResult{Ok: false, Error: &message}
+		return types.IpCheckResult{Ok: false, DurationMs: elapsedMs(start), Error: &message}
 	}
 
 	resp, err := client.Do(req)
@@ -225,10 +235,10 @@ func quickCheck(target string, options quickCheckOptions) types.IpCheckResult {
 		message := strings.ToLower(err.Error())
 		if strings.Contains(message, "timeout") || strings.Contains(message, "deadline exceeded") {
 			timeout := "timeout"
-			return types.IpCheckResult{Ok: false, Error: &timeout}
+			return types.IpCheckResult{Ok: false, DurationMs: elapsedMs(start), Error: &timeout}
 		}
 		original := err.Error()
-		return types.IpCheckResult{Ok: false, Error: &original}
+		return types.IpCheckResult{Ok: false, DurationMs: elapsedMs(start), Error: &original}
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, resp.Body)
@@ -238,6 +248,7 @@ func quickCheck(target string, options quickCheckOptions) types.IpCheckResult {
 	return types.IpCheckResult{
 		Ok:         ok,
 		StatusCode: &statusCode,
+		DurationMs: elapsedMs(start),
 	}
 }
 

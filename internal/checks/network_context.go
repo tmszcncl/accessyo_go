@@ -2,9 +2,7 @@ package checks
 
 import (
 	"bufio"
-	"context"
 	"encoding/json"
-	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -24,7 +22,7 @@ var knownResolvers = map[string]string{
 }
 
 func GetNetworkContext() types.NetworkContext {
-	ipResult, ipv6Available := fetchPublicIPAndCountry(), checkIPv6()
+	ipResult := fetchPublicIPAndCountry()
 
 	resolverIP := getSystemResolver()
 	var resolverLabel *string
@@ -37,7 +35,6 @@ func GetNetworkContext() types.NetworkContext {
 		Country:       ipResult.country,
 		ResolverIP:    resolverIP,
 		ResolverLabel: resolverLabel,
-		IPv6Available: ipv6Available,
 	}
 }
 
@@ -83,17 +80,6 @@ func fetchPublicIPAndCountry() publicIPResult {
 		ip:      &ip,
 		country: country,
 	}
-}
-
-func checkIPv6() bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	ips, err := net.DefaultResolver.LookupIP(ctx, "ip6", "ipv6.google.com")
-	if err != nil {
-		return false
-	}
-	return len(ips) > 0
 }
 
 func getSystemResolver() string {

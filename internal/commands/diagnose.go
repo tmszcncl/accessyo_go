@@ -85,12 +85,7 @@ func printNetworkContext(ctx types.NetworkContext) {
 		resolverLabel = dim(" (" + *ctx.ResolverLabel + ")")
 	}
 	fmt.Printf("     %s   %s%s\n", dim("DNS:"), ctx.ResolverIP, resolverLabel)
-
-	ipv6Text := dim("not available")
-	if ctx.IPv6Available {
-		ipv6Text = green("available") + dim(" (not tested)")
-	}
-	fmt.Printf("     %s  %s\n\n", dim("IPv6:"), ipv6Text)
+	fmt.Println()
 	fmt.Println(line)
 	fmt.Println()
 }
@@ -131,10 +126,6 @@ func printDNS(result types.DnsResult) {
 		fmt.Printf("     %s  %ds\n", dim("TTL:"), *result.TTL)
 	}
 	fmt.Printf("     %s resolves correctly\n", dim("->"))
-
-	if result.CDN != nil {
-		fmt.Printf("     %s likely behind %s %s\n", dim("->"), *result.CDN, dim("(best-effort)"))
-	}
 }
 
 func printTCP(result *types.TcpResult, dnsFailed bool) {
@@ -234,12 +225,11 @@ func printHTTP(result *types.HttpResult) {
 	}
 	if len(result.Redirects) > 0 {
 		fmt.Printf("     %s\n", dim("redirects:"))
-		for _, target := range result.Redirects {
+		for _, target := range result.Redirects[1:] {
 			fmt.Printf("       %s %s\n", dim("->"), dim(target))
 		}
-		fmt.Printf("       %s final\n", dim("->"))
 	} else {
-		fmt.Printf("     %s %s\n", dim("redirects:"), dim("(none)"))
+		fmt.Printf("     %s\n", dim("(no redirects)"))
 	}
 
 	if len(result.Headers) > 0 {
@@ -255,7 +245,7 @@ func printHTTP(result *types.HttpResult) {
 	}
 
 	if result.IPv4 != nil || result.IPv6 != nil {
-		fmt.Printf("     %s\n", dim("connectivity:"))
+		fmt.Printf("     %s\n", dim("IP connectivity:"))
 		if result.IPv4 != nil {
 			icon := red("✗")
 			text := red("FAIL")
@@ -263,7 +253,8 @@ func printHTTP(result *types.HttpResult) {
 				icon = green("✓")
 				text = green("OK")
 			}
-			fmt.Printf("       %s %s %s\n", dim("IPv4:"), icon, text)
+			ms := dim(fmt.Sprintf("(%dms)", result.IPv4.DurationMs))
+			fmt.Printf("       %s %s %s %s\n", dim("IPv4:"), icon, text, ms)
 		}
 		if result.IPv6 != nil {
 			icon := red("✗")
@@ -272,7 +263,8 @@ func printHTTP(result *types.HttpResult) {
 				icon = green("✓")
 				text = green("OK")
 			}
-			fmt.Printf("       %s %s %s\n", dim("IPv6:"), icon, text)
+			ms := dim(fmt.Sprintf("(%dms)", result.IPv6.DurationMs))
+			fmt.Printf("       %s %s %s %s\n", dim("IPv6:"), icon, text, ms)
 		}
 	}
 
@@ -296,11 +288,13 @@ func printHTTP(result *types.HttpResult) {
 	}
 
 	if result.CDN != nil {
-		fmt.Printf("     %s served via %s %s\n", dim("->"), *result.CDN, dim("(CDN)"))
+		fmt.Printf("     %s served via %s %s\n", dim("->"), *result.CDN, dim("(CDN edge)"))
 	}
 
-	if result.IPv6 != nil && !result.IPv6.Ok {
-		fmt.Printf("     %s IPv6 connectivity issue\n", yellow("->"))
+	if result.IPv4 != nil && result.IPv4.Ok && result.IPv6 != nil && result.IPv6.Ok {
+		fmt.Printf("     %s both IPv4 and IPv6 working\n", dim("->"))
+	} else if result.IPv4 != nil && result.IPv4.Ok && result.IPv6 != nil && !result.IPv6.Ok {
+		fmt.Printf("     %s IPv6 connectivity issue (may affect some users)\n", yellow("->"))
 	}
 
 	if result.BrowserDiffers != nil && *result.BrowserDiffers {
