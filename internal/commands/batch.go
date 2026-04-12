@@ -2,7 +2,9 @@ package commands
 
 import (
 	"fmt"
+	"os"
 	"strings"
+	"sync"
 
 	"github.com/tmszcncl/accessyo_go/internal/checks"
 )
@@ -44,37 +46,65 @@ func checkOne(host string) batchResult {
 func Batch(hosts []string) error {
 	fmt.Println()
 
-	results := make([]batchResult, 0, len(hosts))
-	for _, host := range hosts {
-		spinner := startSpinner(host)
-		result := checkOne(host)
-		spinner.Stop()
-		results = append(results, result)
-	}
-
 	maxLen := 0
-	for _, result := range results {
-		if len(result.host) > maxLen {
-			maxLen = len(result.host)
+	for _, host := range hosts {
+		if len(host) > maxLen {
+			maxLen = len(host)
 		}
 	}
 
-	for _, result := range results {
-		padded := result.host
-		for len(padded) < maxLen+3 {
-			padded += " "
+	resultText := func(r batchResult) string {
+		if r.ok {
+			return green("✓ WORKING")
 		}
-
-		if result.ok {
-			fmt.Printf("  %s%s\n", padded, green("✓ WORKING"))
-			continue
-		}
-
 		reason := ""
-		if result.failedAt != "" {
-			reason = dim(" (" + result.failedAt + ")")
+		if r.failedAt != "" {
+			reason = dim(" (" + r.failedAt + ")")
 		}
-		fmt.Printf("  %s%s%s\n", padded, red("✗ NOT WORKING"), reason)
+		return red("✗ NOT WORKING") + reason
+	}
+
+	results := make([]batchResult, len(hosts))
+	isTTY := isTerminal()
+
+	if isTTY {
+		for _, host := range hosts {
+			fmt.Printf("  %s%s%s\n", padRight(host, maxLen+3), dim("·"), dim(" · ·"))
+		}
+
+		var mu sync.Mutex
+		var wg sync.WaitGroup
+		for i, host := range hosts {
+			wg.Add(1)
+			go func(index int, h string) {
+				defer wg.Done()
+				result := checkOne(h)
+				results[index] = result
+
+				mu.Lock()
+				defer mu.Unlock()
+				updateRow(hosts, maxLen, index, resultText(result))
+			}(i, host)
+		}
+		wg.Wait()
+	} else {
+		spinner := startSpinner(fmt.Sprintf("Checking %d domains...", len(hosts)))
+
+		var wg sync.WaitGroup
+		for i, host := range hosts {
+			wg.Add(1)
+			go func(index int, h string) {
+				defer wg.Done()
+				results[index] = checkOne(h)
+			}(i, host)
+		}
+		wg.Wait()
+		spinner.Stop()
+
+		for i, result := range results {
+			label := hosts[i]
+			fmt.Printf("  %s%s\n", padRight(label, maxLen+3), resultText(result))
+		}
 	}
 
 	line := dim(strings.Repeat("-", 40))
@@ -136,4 +166,25 @@ func Batch(hosts []string) error {
 	}
 
 	return nil
+}
+
+func updateRow(hosts []string, maxLen int, index int, text string) {
+	up := len(hosts) - index
+	label := hosts[index]
+	fmt.Printf("\x1b[%dA\r\x1b[2K  %s%s\x1b[%dB\r", up, padRight(label, maxLen+3), text, up)
+}
+
+func padRight(s string, n int) string {
+	if len(s) >= n {
+		return s
+	}
+	return s + strings.Repeat(" ", n-len(s))
+}
+
+func isTerminal() bool {
+	info, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return (info.Mode() & os.ModeCharDevice) != 0
 }
