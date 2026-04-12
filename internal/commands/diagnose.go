@@ -21,10 +21,24 @@ func Diagnose(host string, port int) error {
 	spinner.Stop()
 
 	printNetworkContext(ctx)
+	return diagnoseHost(host, port, nil)
+}
 
-	fmt.Printf("  %s\n\n", bold(host))
+func diagnoseHost(host string, port int, displayHosts []string) error {
+	hideTiming := displayHosts != nil
 
-	spinner2 := startSpinner("Running checks...")
+	header := host
+	if displayHosts != nil {
+		if len(displayHosts) <= 3 {
+			header = strings.Join(displayHosts, ", ")
+		} else {
+			header = strings.Join(displayHosts[:3], ", ") + dim(fmt.Sprintf(" (+%d more)", len(displayHosts)-3))
+		}
+	}
+
+	fmt.Printf("  %s\n\n", bold(header))
+
+	spinner := startSpinner("Running checks...")
 
 	dnsResult := checks.CheckDNS(host, defaultTimeoutMs)
 	var tcpResult *types.TcpResult
@@ -45,15 +59,15 @@ func Diagnose(host string, port int) error {
 		httpResult = &r
 	}
 
-	spinner2.Stop()
+	spinner.Stop()
 
-	printDNS(dnsResult)
+	printDNS(dnsResult, hideTiming)
 	fmt.Println()
-	printTCP(tcpResult, !dnsResult.Ok)
+	printTCP(tcpResult, !dnsResult.Ok, hideTiming)
 	fmt.Println()
-	printTLS(tlsResult)
+	printTLS(tlsResult, hideTiming)
 	fmt.Println()
-	printHTTP(httpResult)
+	printHTTP(httpResult, hideTiming)
 	fmt.Println()
 	printSummary(summary.Input{
 		DNS:  dnsResult,
@@ -85,20 +99,24 @@ func printNetworkContext(ctx types.NetworkContext) {
 		resolverLabel = dim(" (" + *ctx.ResolverLabel + ")")
 	}
 	fmt.Printf("     %s   %s%s\n", dim("DNS:"), ctx.ResolverIP, resolverLabel)
+
 	fmt.Println()
 	fmt.Println(line)
 	fmt.Println()
 }
 
-func printDNS(result types.DnsResult) {
-	duration := dim(fmt.Sprintf("%dms", result.DurationMs))
+func printDNS(result types.DnsResult, hideTiming bool) {
+	duration := ""
+	if !hideTiming {
+		duration = " " + dim(fmt.Sprintf("%dms", result.DurationMs))
+	}
 
 	if !result.Ok {
 		code := ""
 		if result.ErrorCode != nil {
 			code = " (" + *result.ErrorCode + ")"
 		}
-		fmt.Printf("  %s  DNS%s  %s\n\n", red("✗"), code, duration)
+		fmt.Printf("  %s  DNS%s%s\n\n", red("✗"), code, duration)
 		fmt.Printf("     %s\n", red(orDefault(result.Error, "Unknown error")))
 		if result.ErrorCode != nil && *result.ErrorCode == "TIMEOUT" {
 			fmt.Printf("     %s possible DNS blocking or slow resolver\n", dim("->"))
@@ -108,7 +126,7 @@ func printDNS(result types.DnsResult) {
 		return
 	}
 
-	fmt.Printf("  %s  DNS  %s  %s\n", green("✓"), duration, dim(fmt.Sprintf("(resolver: %s)", result.Resolver)))
+	fmt.Printf("  %s  DNS%s  %s\n", green("✓"), duration, dim(fmt.Sprintf("(resolver: %s)", result.Resolver)))
 
 	if len(result.ARecords) > 0 {
 		fmt.Printf("     %s    %s\n", dim("A:"), strings.Join(result.ARecords, ", "))
@@ -128,7 +146,7 @@ func printDNS(result types.DnsResult) {
 	fmt.Printf("     %s resolves correctly\n", dim("->"))
 }
 
-func printTCP(result *types.TcpResult, dnsFailed bool) {
+func printTCP(result *types.TcpResult, dnsFailed bool, hideTiming bool) {
 	if result == nil {
 		reason := ""
 		if dnsFailed {
@@ -138,30 +156,38 @@ func printTCP(result *types.TcpResult, dnsFailed bool) {
 		return
 	}
 
-	duration := dim(fmt.Sprintf("%dms", result.DurationMs))
+	duration := ""
+	if !hideTiming {
+		duration = " " + dim(fmt.Sprintf("%dms", result.DurationMs))
+	}
+
 	if !result.Ok {
-		fmt.Printf("  %s  TCP  %s  %s\n\n", red("✗"), duration, dim(fmt.Sprintf("port %d", result.Port)))
+		fmt.Printf("  %s  TCP%s  %s\n\n", red("✗"), duration, dim(fmt.Sprintf("(port %d)", result.Port)))
 		fmt.Printf("     %s\n", red(orDefault(result.Error, "Unknown error")))
 		fmt.Printf("     %s TLS skipped (TCP failed)\n", dim("->"))
 		return
 	}
-	fmt.Printf("  %s  TCP  %s  %s\n", green("✓"), duration, dim(fmt.Sprintf("port %d", result.Port)))
+	fmt.Printf("  %s  TCP%s  %s\n", green("✓"), duration, dim(fmt.Sprintf("(port %d)", result.Port)))
 }
 
-func printTLS(result *types.TlsResult) {
+func printTLS(result *types.TlsResult, hideTiming bool) {
 	if result == nil {
 		fmt.Printf("  %s  TLS  %s\n", dim("-"), dim("skipped"))
 		return
 	}
 
-	duration := dim(fmt.Sprintf("%dms", result.DurationMs))
+	duration := ""
+	if !hideTiming {
+		duration = " " + dim(fmt.Sprintf("%dms", result.DurationMs))
+	}
+
 	if !result.Ok {
-		fmt.Printf("  %s  TLS  %s\n\n", red("✗"), duration)
+		fmt.Printf("  %s  TLS%s\n\n", red("✗"), duration)
 		fmt.Printf("     %s\n", red(orDefault(result.Error, "Unknown error")))
 		return
 	}
 
-	fmt.Printf("  %s  TLS  %s\n", green("✓"), duration)
+	fmt.Printf("  %s  TLS%s\n", green("✓"), duration)
 	if result.Protocol != nil {
 		fmt.Printf("     %s %s\n", dim("protocol:"), *result.Protocol)
 	}
@@ -192,19 +218,23 @@ func printTLS(result *types.TlsResult) {
 	}
 }
 
-func printHTTP(result *types.HttpResult) {
+func printHTTP(result *types.HttpResult, hideTiming bool) {
 	if result == nil {
 		fmt.Printf("  %s  HTTP  %s\n", dim("-"), dim("skipped"))
 		return
 	}
 
-	duration := dim(fmt.Sprintf("%dms", result.DurationMs))
+	duration := ""
+	if !hideTiming {
+		duration = " " + dim(fmt.Sprintf("%dms", result.DurationMs))
+	}
+
 	if !result.Ok {
 		block := ""
 		if result.BlockedBy != nil {
 			block = " (" + *result.BlockedBy + ")"
 		}
-		fmt.Printf("  %s  HTTP%s  %s\n\n", red("✗"), block, duration)
+		fmt.Printf("  %s  HTTP%s%s\n\n", red("✗"), block, duration)
 		if result.BlockedBy != nil && *result.BlockedBy == "Cloudflare" {
 			fmt.Printf("     %s\n", red("Request blocked by Cloudflare / WAF"))
 		} else if result.BlockedBy != nil && *result.BlockedBy == "server-side" {
@@ -219,10 +249,11 @@ func printHTTP(result *types.HttpResult) {
 		return
 	}
 
-	fmt.Printf("  %s  HTTP  %s\n", green("✓"), duration)
+	fmt.Printf("  %s  HTTP%s\n", green("✓"), duration)
 	if result.StatusCode != nil {
 		fmt.Printf("     %s %d %s\n", dim("status:"), *result.StatusCode, statusLabel(*result.StatusCode))
 	}
+
 	if len(result.Redirects) > 0 {
 		fmt.Printf("     %s\n", dim("redirects:"))
 		for _, target := range result.Redirects[1:] {
@@ -281,10 +312,10 @@ func printHTTP(result *types.HttpResult) {
 		fmt.Printf("     %s request blocked (possible CDN / WAF)\n", yellow("->"))
 	} else if status == 404 {
 		fmt.Printf("     %s page not found\n", yellow("->"))
-	} else if status >= 400 && status < 500 {
-		fmt.Printf("     %s client error - possible access restriction\n", yellow("->"))
 	} else if status >= 500 {
 		fmt.Printf("     %s server error\n", red("->"))
+	} else if status >= 400 {
+		fmt.Printf("     %s client error - possible access restriction\n", yellow("->"))
 	}
 
 	if result.CDN != nil {

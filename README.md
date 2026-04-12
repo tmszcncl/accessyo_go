@@ -37,14 +37,21 @@ The CLI is in active development. Currently supports:
 - TCP connectivity check
 - TLS handshake (protocol, cipher, certificate info + expiry)
 - HTTP request (status, redirects, IPv4/IPv6, browser UA comparison, CDN detection, WAF blocking)
+- Batch mode - check multiple domains at once
 
-Run locally:
+Single domain (full detailed output):
 
 ```bash
 go run ./cmd/accessyo example.com
 ```
 
-Alternative command form:
+Multiple domains (compact summary + auto-details for failures):
+
+```bash
+go run ./cmd/accessyo example.com api.example.com cdn.example.com
+```
+
+Alternative command form (`diagnose`):
 
 ```bash
 go run ./cmd/accessyo diagnose example.com

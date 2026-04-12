@@ -8,32 +8,33 @@ import (
 )
 
 func main() {
-	host, ok := parseArgs(os.Args[1:])
-	if !ok {
+	args := os.Args[1:]
+	if len(args) == 0 {
 		printUsage()
 		os.Exit(2)
 	}
 
-	if err := commands.Diagnose(host, 443); err != nil {
+	var err error
+	if args[0] == "diagnose" {
+		if len(args) != 2 {
+			printUsage()
+			os.Exit(2)
+		}
+		err = commands.Diagnose(args[1], 443)
+	} else if len(args) == 1 {
+		err = commands.Diagnose(args[0], 443)
+	} else {
+		err = commands.Batch(args)
+	}
+
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func parseArgs(args []string) (string, bool) {
-	if len(args) == 1 {
-		return args[0], true
-	}
-
-	if len(args) == 2 && args[0] == "diagnose" {
-		return args[1], true
-	}
-
-	return "", false
-}
-
 func printUsage() {
 	fmt.Fprintln(os.Stderr, "Usage:")
-	fmt.Fprintln(os.Stderr, "  accessyo <host>")
+	fmt.Fprintln(os.Stderr, "  accessyo <host...>")
 	fmt.Fprintln(os.Stderr, "  accessyo diagnose <host>")
 }
