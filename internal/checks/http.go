@@ -3,6 +3,7 @@ package checks
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -35,13 +36,21 @@ var keyHeaders = []string{
 var hstsMaxAgePattern = regexp.MustCompile(`max-age=(\d+)`)
 
 func CheckHTTP(host string, aRecords []string, aaaaRecords []string) types.HttpResult {
+	return CheckHTTPWithTimeout(host, aRecords, aaaaRecords, httpTimeout)
+}
+
+func CheckHTTPWithTimeout(host string, aRecords []string, aaaaRecords []string, timeoutMs int) types.HttpResult {
+	if timeoutMs <= 0 {
+		timeoutMs = httpTimeout
+	}
+
 	target := host
 	if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
 		target = "https://" + target
 	}
 
 	start := time.Now()
-	mainResult := followRedirects(target, []string{}, start, accessyoUA)
+	mainResult := followRedirects(target, []string{}, start, accessyoUA, timeoutMs)
 	if mainResult.StatusCode == nil {
 		return mainResult
 	}
@@ -51,13 +60,13 @@ func CheckHTTP(host string, aRecords []string, aaaaRecords []string) types.HttpR
 	var ipv4 *types.IpCheckResult
 	var ipv6 *types.IpCheckResult
 	if bothFamilies {
-		v4 := quickCheck(target, quickCheckOptions{family: 4, userAgent: accessyoUA})
-		v6 := quickCheck(target, quickCheckOptions{family: 6, userAgent: accessyoUA})
+		v4 := quickCheck(target, quickCheckOptions{family: 4, userAgent: accessyoUA, timeoutMs: timeoutMs})
+		v6 := quickCheck(target, quickCheckOptions{family: 6, userAgent: accessyoUA, timeoutMs: timeoutMs})
 		ipv4 = &v4
 		ipv6 = &v6
 	}
 
-	browserResult := followRedirects(target, []string{}, time.Now(), browserUA)
+	browserResult := followRedirects(target, []string{}, time.Now(), browserUA, timeoutMs)
 	wwwCheck := CheckWwwRedirect(host, mainResult.Redirects)
 
 	browserFinal := 0
@@ -127,7 +136,10 @@ func CheckWwwRedirect(host string, redirects []string) types.WwwCheckResult {
 	return types.WwwCheckResult{Kind: "both-ok"}
 }
 
-func followRedirects(target string, chain []string, start time.Time, userAgent string) types.HttpResult {
+func followRedirects(target string, chain []string, start time.Time, userAgent string, timeoutMs int) types.HttpResult {
+	if timeoutMs <= 0 {
+		timeoutMs = httpTimeout
+	}
 	if len(chain) > maxRedirects {
 		message := "Too many redirects (redirect loop)"
 		return types.HttpResult{
@@ -139,9 +151,9 @@ func followRedirects(target string, chain []string, start time.Time, userAgent s
 		}
 	}
 
-	client := newHTTPClient(0)
+	client := newHTTPClient(0, timeoutMs)
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(httpTimeout)*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutMs)*time.Millisecond)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
@@ -159,7 +171,7 @@ func followRedirects(target string, chain []string, start time.Time, userAgent s
 
 	resp, err := client.Do(req)
 	if err != nil {
-		message := formatHTTPError(err)
+		message := formatHTTPError(err, timeoutMs)
 		return types.HttpResult{
 			Ok:         false,
 			DurationMs: elapsedMs(start),
@@ -169,6 +181,7 @@ func followRedirects(target string, chain []string, start time.Time, userAgent s
 		}
 	}
 	defer resp.Body.Close()
+	ttfb := elapsedMs(start)
 	_, _ = io.Copy(io.Discard, resp.Body)
 
 	filteredHeaders := extractHeaders(resp.Header)
@@ -178,17 +191,22 @@ func followRedirects(target string, chain []string, start time.Time, userAgent s
 		location := resp.Header.Get("Location")
 		if location != "" {
 			next := ResolveRedirect(target, location)
-			return followRedirects(next, append(chain, target), start, userAgent)
+			return followRedirects(next, append(chain, target), start, userAgent, timeoutMs)
 		}
 	}
 
 	blockedBy := DetectBlock(statusCode, filteredHeaders)
 	cdn := DetectCdn(filteredHeaders)
 	ok := statusCode >= 200 && statusCode < 500 && blockedBy == nil
+	var ttfbPtr *int64
+	if len(chain) == 0 {
+		ttfbPtr = &ttfb
+	}
 
 	return types.HttpResult{
 		Ok:         ok,
 		DurationMs: elapsedMs(start),
+		TTFB:       ttfbPtr,
 		StatusCode: &statusCode,
 		Redirects:  redirectsWithFinal(chain, target),
 		Headers:    filteredHeaders,
@@ -206,8 +224,11 @@ func redirectsWithFinal(chain []string, finalURL string) []string {
 	return out
 }
 
-func newHTTPClient(family int) *http.Client {
-	dialer := &net.Dialer{Timeout: time.Duration(httpTimeout) * time.Millisecond}
+func newHTTPClient(family int, timeoutMs int) *http.Client {
+	if timeoutMs <= 0 {
+		timeoutMs = httpTimeout
+	}
+	dialer := &net.Dialer{Timeout: time.Duration(timeoutMs) * time.Millisecond}
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
 	}
@@ -223,7 +244,7 @@ func newHTTPClient(family int) *http.Client {
 	}
 
 	return &http.Client{
-		Timeout: time.Duration(httpTimeout) * time.Millisecond,
+		Timeout: time.Duration(timeoutMs) * time.Millisecond,
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
@@ -293,13 +314,18 @@ func ParseHSTS(value string) types.HstsInfo {
 type quickCheckOptions struct {
 	family    int
 	userAgent string
+	timeoutMs int
 }
 
 func quickCheck(target string, options quickCheckOptions) types.IpCheckResult {
 	start := time.Now()
-	client := newHTTPClient(options.family)
+	ms := options.timeoutMs
+	if ms <= 0 {
+		ms = httpTimeout
+	}
+	client := newHTTPClient(options.family, ms)
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(httpTimeout)*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(ms)*time.Millisecond)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
@@ -334,9 +360,12 @@ func quickCheck(target string, options quickCheckOptions) types.IpCheckResult {
 	}
 }
 
-func formatHTTPError(err error) string {
+func formatHTTPError(err error, timeoutMs int) string {
 	if err == nil {
 		return "Unknown HTTP error"
+	}
+	if timeoutMs <= 0 {
+		timeoutMs = httpTimeout
 	}
 
 	lowered := strings.ToLower(err.Error())
@@ -350,7 +379,7 @@ func formatHTTPError(err error) string {
 	case strings.Contains(lowered, "x509"), strings.Contains(lowered, "certificate"):
 		return "TLS/certificate error"
 	case strings.Contains(lowered, "deadline exceeded"), strings.Contains(lowered, "timeout"):
-		return "Timeout after 5000ms - server not responding"
+		return fmt.Sprintf("Timeout after %dms - server not responding", timeoutMs)
 	default:
 		return err.Error()
 	}

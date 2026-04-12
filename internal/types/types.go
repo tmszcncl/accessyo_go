@@ -1,75 +1,78 @@
 package types
 
 type NetworkContext struct {
-	PublicIP      *string
-	Country       *string
-	ResolverIP    string
-	ResolverLabel *string
+	PublicIP      *string `json:"publicIP,omitempty"`
+	Country       *string `json:"country,omitempty"`
+	ResolverIP    string  `json:"resolverIP"`
+	ResolverLabel *string `json:"resolverLabel,omitempty"`
 }
 
 type IpCheckResult struct {
-	Ok         bool
-	StatusCode *int
-	DurationMs int64
-	Error      *string
+	Ok         bool    `json:"ok"`
+	StatusCode *int    `json:"statusCode,omitempty"`
+	DurationMs int64   `json:"durationMs"`
+	Error      *string `json:"error,omitempty"`
 }
 
 type WwwCheckResult struct {
-	Kind string
+	Kind string `json:"kind"`
 }
 
 type HstsInfo struct {
-	Raw               string
-	MaxAge            int
-	IncludeSubDomains bool
-	Preload           bool
+	Raw               string `json:"raw"`
+	MaxAge            int    `json:"maxAge"`
+	IncludeSubDomains bool   `json:"includeSubDomains"`
+	Preload           bool   `json:"preload"`
 }
 
 type HttpResult struct {
-	Ok                bool
-	DurationMs        int64
-	StatusCode        *int
-	Redirects         []string
-	Headers           map[string]string
-	Error             *string
-	BlockedBy         *string
-	CDN               *string
-	IPv4              *IpCheckResult
-	IPv6              *IpCheckResult
-	BrowserStatusCode *int
-	BrowserDiffers    *bool
-	WwwCheck          *WwwCheckResult
-	HSTS              *HstsInfo
+	Ok                bool              `json:"ok"`
+	DurationMs        int64             `json:"durationMs"`
+	TTFB              *int64            `json:"ttfb,omitempty"`
+	StatusCode        *int              `json:"statusCode,omitempty"`
+	Redirects         []string          `json:"redirects"`
+	Headers           map[string]string `json:"headers"`
+	Error             *string           `json:"error,omitempty"`
+	BlockedBy         *string           `json:"blockedBy,omitempty"`
+	CDN               *string           `json:"cdn,omitempty"`
+	IPv4              *IpCheckResult    `json:"ipv4,omitempty"`
+	IPv6              *IpCheckResult    `json:"ipv6,omitempty"`
+	BrowserStatusCode *int              `json:"browserStatusCode,omitempty"`
+	BrowserDiffers    *bool             `json:"browserDiffers,omitempty"`
+	WwwCheck          *WwwCheckResult   `json:"wwwCheck,omitempty"`
+	HSTS              *HstsInfo         `json:"hsts,omitempty"`
 }
 
 type TcpResult struct {
-	Ok         bool
-	DurationMs int64
-	Port       int
-	Error      *string
+	Ok         bool    `json:"ok"`
+	DurationMs int64   `json:"durationMs"`
+	Port       int     `json:"port"`
+	Error      *string `json:"error,omitempty"`
 }
 
 type TlsResult struct {
-	Ok                bool
-	DurationMs        int64
-	Protocol          *string
-	Cipher            *string
-	AlpnProtocol      *string
-	CertIssuer        *string
-	CertValidTo       *string
-	CertExpired       *bool
-	CertDaysRemaining *int
-	Error             *string
+	Ok                bool    `json:"ok"`
+	DurationMs        int64   `json:"durationMs"`
+	Protocol          *string `json:"protocol,omitempty"`
+	Cipher            *string `json:"cipher,omitempty"`
+	AlpnProtocol      *string `json:"alpnProtocol,omitempty"`
+	HostnameMatch     *bool   `json:"hostnameMatch,omitempty"`
+	CertIssuer        *string `json:"certIssuer,omitempty"`
+	CertValidTo       *string `json:"certValidTo,omitempty"`
+	CertExpired       *bool   `json:"certExpired,omitempty"`
+	CertDaysRemaining *int    `json:"certDaysRemaining,omitempty"`
+	Error             *string `json:"error,omitempty"`
 }
 
 type DnsResult struct {
-	Ok          bool
-	DurationMs  int64
-	Resolver    string
-	ARecords    []string
-	AaaaRecords []string
-	TTL         *uint32
-	CDN         *string
-	Error       *string
-	ErrorCode   *string
+	Ok          bool     `json:"ok"`
+	DurationMs  int64    `json:"durationMs"`
+	Resolver    string   `json:"resolver"`
+	ARecords    []string `json:"aRecords,omitempty"`
+	AaaaRecords []string `json:"aaaaRecords,omitempty"`
+	CNAME       *string  `json:"cname,omitempty"`
+	TTL         *uint32  `json:"ttl,omitempty"`
+	CDN         *string  `json:"cdn,omitempty"`
+	Error       *string  `json:"error,omitempty"`
+	ErrorCode   *string  `json:"errorCode,omitempty"`
 }

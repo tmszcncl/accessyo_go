@@ -36,6 +36,8 @@ func CheckTLS(host string, port int, timeoutMs int) types.TlsResult {
 		Cipher:       &cipherName,
 		AlpnProtocol: negotiatedALPN(state),
 	}
+	hostnameMatch := true
+	result.HostnameMatch = &hostnameMatch
 
 	if len(state.PeerCertificates) > 0 {
 		cert := state.PeerCertificates[0]

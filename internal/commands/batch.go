@@ -1,12 +1,14 @@
 package commands
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 	"sync"
 
 	"github.com/tmszcncl/accessyo_go/internal/checks"
+	"github.com/tmszcncl/accessyo_go/internal/types"
 )
 
 type batchResult struct {
@@ -17,22 +19,26 @@ type batchResult struct {
 }
 
 func checkOne(host string) batchResult {
-	dns := checks.CheckDNS(host, defaultTimeoutMs)
+	return checkOneWithTimeout(host, defaultTimeoutMs)
+}
+
+func checkOneWithTimeout(host string, timeoutMs int) batchResult {
+	dns := checks.CheckDNS(host, timeoutMs)
 	if !dns.Ok {
 		return batchResult{host: host, ok: false, failedAt: "DNS", warnings: []string{}}
 	}
 
-	tcp := checks.CheckTCP(host, 443, defaultTimeoutMs)
+	tcp := checks.CheckTCP(host, 443, timeoutMs)
 	if !tcp.Ok {
 		return batchResult{host: host, ok: false, failedAt: "TCP", warnings: []string{}}
 	}
 
-	tls := checks.CheckTLS(host, 443, defaultTimeoutMs)
+	tls := checks.CheckTLS(host, 443, timeoutMs)
 	if !tls.Ok {
 		return batchResult{host: host, ok: false, failedAt: "TLS", warnings: []string{}}
 	}
 
-	http := checks.CheckHTTP(host, dns.ARecords, dns.AaaaRecords)
+	http := checks.CheckHTTPWithTimeout(host, dns.ARecords, dns.AaaaRecords, timeoutMs)
 	if !http.Ok {
 		code := ""
 		if http.StatusCode != nil {
@@ -51,7 +57,7 @@ func checkOne(host string) batchResult {
 	if tls.CertDaysRemaining != nil && *tls.CertDaysRemaining < 30 {
 		warnings = append(warnings, fmt.Sprintf("cert %dd", *tls.CertDaysRemaining))
 	}
-	if http.IPv6 != nil && !http.IPv6.Ok {
+	if http.IPv6 != nil && !http.IPv6.Ok && (http.IPv6.Error == nil || *http.IPv6.Error != "timeout") {
 		warnings = append(warnings, "IPv6")
 	}
 	if http.DurationMs > 2000 {
@@ -61,7 +67,56 @@ func checkOne(host string) batchResult {
 	return batchResult{host: host, ok: true, warnings: warnings}
 }
 
-func Batch(hosts []string) error {
+func runChecks(host string, timeoutMs int) (types.DnsResult, *types.TcpResult, *types.TlsResult, *types.HttpResult) {
+	dns := checks.CheckDNS(host, timeoutMs)
+
+	var tcp *types.TcpResult
+	if dns.Ok {
+		t := checks.CheckTCP(host, 443, timeoutMs)
+		tcp = &t
+	}
+
+	var tls *types.TlsResult
+	if tcp != nil && tcp.Ok {
+		t := checks.CheckTLS(host, 443, timeoutMs)
+		tls = &t
+	}
+
+	var httpResult *types.HttpResult
+	if (tls != nil && tls.Ok) || (tls == nil && tcp != nil && tcp.Ok) {
+		h := checks.CheckHTTPWithTimeout(host, dns.ARecords, dns.AaaaRecords, timeoutMs)
+		httpResult = &h
+	}
+
+	return dns, tcp, tls, httpResult
+}
+
+func Batch(hosts []string, timeoutMs int, jsonOutput bool) error {
+	if timeoutMs <= 0 {
+		timeoutMs = defaultTimeoutMs
+	}
+
+	if jsonOutput {
+		outputs := make([]JsonOutput, len(hosts))
+		var wg sync.WaitGroup
+		for i, host := range hosts {
+			wg.Add(1)
+			go func(index int, h string) {
+				defer wg.Done()
+				dns, tcp, tls, httpResult := runChecks(h, timeoutMs)
+				outputs[index] = buildJSONOutput(h, dns, tcp, tls, httpResult)
+			}(i, host)
+		}
+		wg.Wait()
+
+		encoded, err := json.MarshalIndent(outputs, "", "  ")
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(encoded))
+		return nil
+	}
+
 	fmt.Println()
 
 	maxLen := 0
@@ -107,7 +162,7 @@ func Batch(hosts []string) error {
 			wg.Add(1)
 			go func(index int, h string) {
 				defer wg.Done()
-				result := checkOne(h)
+				result := checkOneWithTimeout(h, timeoutMs)
 				results[index] = result
 
 				mu.Lock()
@@ -124,7 +179,7 @@ func Batch(hosts []string) error {
 			wg.Add(1)
 			go func(index int, h string) {
 				defer wg.Done()
-				results[index] = checkOne(h)
+				results[index] = checkOneWithTimeout(h, timeoutMs)
 			}(i, host)
 		}
 		wg.Wait()
@@ -187,7 +242,7 @@ func Batch(hosts []string) error {
 				displayHosts = append(displayHosts, result.host)
 			}
 			if len(group) > 0 {
-				if err := diagnoseHost(group[0].host, 443, displayHosts); err != nil {
+				if err := diagnoseHost(group[0].host, 443, displayHosts, timeoutMs); err != nil {
 					return err
 				}
 			}

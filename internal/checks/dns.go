@@ -22,14 +22,16 @@ func CheckDNS(host string, timeoutMs int) types.DnsResult {
 
 	var aRecords []string
 	var aaaaRecords []string
+	var cname *string
 	var aErr error
 	var aaaaErr error
+	var cnameErr error
 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		var wg sync.WaitGroup
-		wg.Add(2)
+		wg.Add(3)
 
 		go func() {
 			defer wg.Done()
@@ -51,6 +53,19 @@ func CheckDNS(host string, timeoutMs int) types.DnsResult {
 			aaaaRecords = dedupeIPStrings(ips)
 		}()
 
+		go func() {
+			defer wg.Done()
+			record, err := net.DefaultResolver.LookupCNAME(ctx, host)
+			if err != nil {
+				cnameErr = err
+				return
+			}
+			trimmed := strings.TrimSuffix(record, ".")
+			if trimmed != "" {
+				cname = &trimmed
+			}
+		}()
+
 		wg.Wait()
 	}()
 
@@ -70,7 +85,7 @@ func CheckDNS(host string, timeoutMs int) types.DnsResult {
 
 	ok := len(aRecords) > 0 || len(aaaaRecords) > 0
 	if !ok {
-		err := firstError(aErr, aaaaErr)
+		err := firstError(aErr, aaaaErr, cnameErr)
 		message := formatDNSError(err)
 		code := dnsErrorCode(err)
 		return types.DnsResult{
@@ -92,6 +107,7 @@ func CheckDNS(host string, timeoutMs int) types.DnsResult {
 		Resolver:    resolver,
 		ARecords:    aRecords,
 		AaaaRecords: aaaaRecords,
+		CNAME:       cname,
 		TTL:         nil,
 		CDN:         cdn,
 	}

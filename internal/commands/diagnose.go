@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -13,7 +14,22 @@ import (
 
 const defaultTimeoutMs = 5000
 
-func Diagnose(host string, port int) error {
+func Diagnose(host string, port int, timeoutMs int, jsonOutput bool) error {
+	if timeoutMs <= 0 {
+		timeoutMs = defaultTimeoutMs
+	}
+
+	if jsonOutput {
+		dns, tcp, tls, httpResult := runChecks(host, timeoutMs)
+		out := buildJSONOutput(host, dns, tcp, tls, httpResult)
+		encoded, err := json.MarshalIndent(out, "", "  ")
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(encoded))
+		return nil
+	}
+
 	fmt.Println()
 
 	spinner := startSpinner("Detecting network...")
@@ -21,10 +37,14 @@ func Diagnose(host string, port int) error {
 	spinner.Stop()
 
 	printNetworkContext(ctx)
-	return diagnoseHost(host, port, nil)
+	return diagnoseHost(host, port, nil, timeoutMs)
 }
 
-func diagnoseHost(host string, port int, displayHosts []string) error {
+func diagnoseHost(host string, port int, displayHosts []string, timeoutMs int) error {
+	if timeoutMs <= 0 {
+		timeoutMs = defaultTimeoutMs
+	}
+
 	hideTiming := displayHosts != nil
 
 	header := host
@@ -40,22 +60,22 @@ func diagnoseHost(host string, port int, displayHosts []string) error {
 
 	spinner := startSpinner("Running checks...")
 
-	dnsResult := checks.CheckDNS(host, defaultTimeoutMs)
+	dnsResult := checks.CheckDNS(host, timeoutMs)
 	var tcpResult *types.TcpResult
 	if dnsResult.Ok {
-		r := checks.CheckTCP(host, port, defaultTimeoutMs)
+		r := checks.CheckTCP(host, port, timeoutMs)
 		tcpResult = &r
 	}
 
 	var tlsResult *types.TlsResult
 	if tcpResult != nil && tcpResult.Ok {
-		r := checks.CheckTLS(host, port, defaultTimeoutMs)
+		r := checks.CheckTLS(host, port, timeoutMs)
 		tlsResult = &r
 	}
 
 	var httpResult *types.HttpResult
 	if (tlsResult != nil && tlsResult.Ok) || (tlsResult == nil && tcpResult != nil && tcpResult.Ok) {
-		r := checks.CheckHTTP(host, dnsResult.ARecords, dnsResult.AaaaRecords)
+		r := checks.CheckHTTPWithTimeout(host, dnsResult.ARecords, dnsResult.AaaaRecords, timeoutMs)
 		httpResult = &r
 	}
 
@@ -133,6 +153,9 @@ func printDNS(result types.DnsResult, hideTiming bool) {
 	}
 	if len(result.AaaaRecords) > 0 {
 		fmt.Printf("     %s %s\n", dim("AAAA:"), strings.Join(result.AaaaRecords, ", "))
+	}
+	if result.CNAME != nil {
+		fmt.Printf("     %s %s\n", dim("CNAME:"), *result.CNAME)
 	}
 
 	if len(result.ARecords) == 0 && len(result.AaaaRecords) > 0 {
@@ -213,6 +236,13 @@ func printTLS(result *types.TlsResult, hideTiming bool) {
 			}
 			fmt.Printf("       %s %s\n", dim("valid to:"), validTo)
 		}
+		if result.HostnameMatch != nil {
+			label := red("✗ mismatch")
+			if *result.HostnameMatch {
+				label = green("✓ OK")
+			}
+			fmt.Printf("       %s %s\n", dim("hostname:"), label)
+		}
 	}
 	fmt.Printf("     %s TLS handshake successful\n", dim("->"))
 
@@ -259,6 +289,9 @@ func printHTTP(result *types.HttpResult, hideTiming bool) {
 	fmt.Printf("  %s  HTTP%s\n", green("✓"), duration)
 	if result.StatusCode != nil {
 		fmt.Printf("     %s %d %s\n", dim("status:"), *result.StatusCode, statusLabel(*result.StatusCode))
+	}
+	if result.TTFB != nil {
+		fmt.Printf("     %s   %dms\n", dim("TTFB:"), *result.TTFB)
 	}
 
 	if len(result.Redirects) > 0 {
@@ -313,9 +346,13 @@ func printHTTP(result *types.HttpResult, hideTiming bool) {
 	if result.IPv4 != nil || result.IPv6 != nil {
 		fmt.Printf("     %s\n", dim("IP connectivity:"))
 		if result.IPv4 != nil {
+			timedOut := !result.IPv4.Ok && result.IPv4.Error != nil && *result.IPv4.Error == "timeout"
 			icon := red("✗")
 			text := red("FAIL")
-			if result.IPv4.Ok {
+			if timedOut {
+				icon = dim("-")
+				text = dim("timeout (CDN rate-limit?)")
+			} else if result.IPv4.Ok {
 				icon = green("✓")
 				text = green("OK")
 			}
@@ -323,9 +360,13 @@ func printHTTP(result *types.HttpResult, hideTiming bool) {
 			fmt.Printf("       %s %s %s %s\n", dim("IPv4:"), icon, text, ms)
 		}
 		if result.IPv6 != nil {
+			timedOut := !result.IPv6.Ok && result.IPv6.Error != nil && *result.IPv6.Error == "timeout"
 			icon := red("✗")
 			text := red("FAIL")
-			if result.IPv6.Ok {
+			if timedOut {
+				icon = dim("-")
+				text = dim("timeout (CDN rate-limit?)")
+			} else if result.IPv6.Ok {
 				icon = green("✓")
 				text = green("OK")
 			}
@@ -447,26 +488,38 @@ func printSummary(input summary.Input) {
 
 	fmt.Println(line)
 	fmt.Println()
-	row("DNS", boolPtr(input.DNS.Ok), "")
+	row("DNS", boolPtr(input.DNS.Ok), fmt.Sprintf("%dms", input.DNS.DurationMs))
 	if input.TCP == nil {
 		row("TCP", nil, "")
 	} else {
-		row("TCP", boolPtr(input.TCP.Ok), "")
+		row("TCP", boolPtr(input.TCP.Ok), fmt.Sprintf("%dms", input.TCP.DurationMs))
 	}
 	if input.TLS == nil {
 		row("TLS", nil, "")
 	} else {
-		row("TLS", boolPtr(input.TLS.Ok), "")
+		row("TLS", boolPtr(input.TLS.Ok), fmt.Sprintf("%dms", input.TLS.DurationMs))
 	}
 	if input.HTTP == nil {
 		row("HTTP", nil, "")
 	} else {
-		extra := ""
+		extra := fmt.Sprintf("%dms", input.HTTP.DurationMs)
 		if input.HTTP.StatusCode != nil {
-			extra = fmt.Sprintf("%d", *input.HTTP.StatusCode)
+			extra = fmt.Sprintf("%d, %s", *input.HTTP.StatusCode, extra)
 		}
 		row("HTTP", boolPtr(input.HTTP.Ok), extra)
 	}
+	total := input.DNS.DurationMs
+	if input.TCP != nil {
+		total += input.TCP.DurationMs
+	}
+	if input.TLS != nil {
+		total += input.TLS.DurationMs
+	}
+	if input.HTTP != nil {
+		total += input.HTTP.DurationMs
+	}
+	fmt.Println()
+	fmt.Printf("  %-6s %s\n", "Total", dim(fmt.Sprintf("%dms", total)))
 	fmt.Println()
 
 	if s.AllOK {
@@ -480,8 +533,8 @@ func printSummary(input summary.Input) {
 	fmt.Printf("  %s %s\n\n", red("STATUS:"), red("✗ NOT WORKING"))
 
 	if s.Problem != nil {
-		fmt.Printf("  %s\n", bold("Problem:"))
-		fmt.Printf("  %s %s\n\n", dim("->"), *s.Problem)
+		fmt.Printf("  %s\n", bold(red("ROOT CAUSE:")))
+		fmt.Printf("  %s %s\n\n", red("->"), *s.Problem)
 	}
 
 	if s.LikelyCause != nil {
