@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tmszcncl/accessyo_go/internal/checks"
+	"github.com/tmszcncl/accessyo_go/internal/summary"
 	"github.com/tmszcncl/accessyo_go/internal/types"
 )
 
@@ -55,6 +56,13 @@ func Diagnose(host string, port int) error {
 	printTLS(tlsResult)
 	fmt.Println()
 	printHTTP(httpResult)
+	fmt.Println()
+	printSummary(summary.Input{
+		DNS:  dnsResult,
+		TCP:  tcpResult,
+		TLS:  tlsResult,
+		HTTP: httpResult,
+	})
 	fmt.Println()
 
 	return nil
@@ -214,6 +222,82 @@ func printHTTP(result *types.HttpResult) {
 	}
 }
 
+func printSummary(input summary.Input) {
+	s := summary.Build(input)
+	line := dim(strings.Repeat("-", 40))
+
+	row := func(label string, ok *bool, extra string) {
+		var icon string
+		var text string
+		if ok == nil {
+			icon = dim("-")
+			text = dim("skipped")
+		} else if *ok {
+			icon = green("✓")
+			text = green("OK")
+		} else {
+			icon = red("✗")
+			text = red("FAIL")
+		}
+
+		suffix := ""
+		if extra != "" {
+			suffix = dim(" (" + extra + ")")
+		}
+		fmt.Printf("  %-6s %s %s%s\n", label, icon, text, suffix)
+	}
+
+	fmt.Println(line)
+	fmt.Println()
+	row("DNS", boolPtr(input.DNS.Ok), "")
+	row("TCP", boolPtr(input.TCP.Ok), "")
+	if input.TLS == nil {
+		row("TLS", nil, "")
+	} else {
+		row("TLS", boolPtr(input.TLS.Ok), "")
+	}
+	if input.HTTP == nil {
+		row("HTTP", nil, "")
+	} else {
+		extra := ""
+		if input.HTTP.StatusCode != nil {
+			extra = fmt.Sprintf("%d", *input.HTTP.StatusCode)
+		}
+		row("HTTP", boolPtr(input.HTTP.Ok), extra)
+	}
+	fmt.Println()
+
+	if s.AllOK {
+		fmt.Printf("  %s %s\n\n", green("STATUS:"), green("✓ WORKING"))
+		fmt.Printf("  %s all checks passed\n", dim("->"))
+		fmt.Println()
+		fmt.Println(line)
+		return
+	}
+
+	fmt.Printf("  %s %s\n\n", red("STATUS:"), red("✗ NOT WORKING"))
+
+	if s.Problem != nil {
+		fmt.Printf("  %s\n", bold("Problem:"))
+		fmt.Printf("  %s %s\n\n", dim("->"), *s.Problem)
+	}
+
+	if s.LikelyCause != nil {
+		fmt.Printf("  %s\n", bold("Likely cause:"))
+		fmt.Printf("  %s %s\n\n", dim("->"), *s.LikelyCause)
+	}
+
+	if len(s.WhatYouCanDo) > 0 {
+		fmt.Printf("  %s\n", bold("What you can do:"))
+		for _, tip := range s.WhatYouCanDo {
+			fmt.Printf("  %s %s\n", dim("->"), tip)
+		}
+		fmt.Println()
+	}
+
+	fmt.Println(line)
+}
+
 type spinner struct {
 	stop chan struct{}
 	done chan struct{}
@@ -258,6 +342,8 @@ func orDefault(value *string, fallback string) string {
 	}
 	return *value
 }
+
+func boolPtr(v bool) *bool { return &v }
 
 func green(s string) string  { return "\033[32m" + s + "\033[0m" }
 func red(s string) string    { return "\033[31m" + s + "\033[0m" }
