@@ -15,9 +15,16 @@ const defaultTimeoutMs = 5000
 
 func Diagnose(host string, port int) error {
 	fmt.Println()
+
+	spinner := startSpinner("Detecting network...")
+	ctx := checks.GetNetworkContext()
+	spinner.Stop()
+
+	printNetworkContext(ctx)
+
 	fmt.Printf("  %s\n\n", bold(host))
 
-	spinner := startSpinner("Running checks...")
+	spinner2 := startSpinner("Running checks...")
 
 	dnsResult := checks.CheckDNS(host, defaultTimeoutMs)
 	var tcpResult *types.TcpResult
@@ -38,7 +45,7 @@ func Diagnose(host string, port int) error {
 		httpResult = &r
 	}
 
-	spinner.Stop()
+	spinner2.Stop()
 
 	printDNS(dnsResult)
 	fmt.Println()
@@ -59,9 +66,37 @@ func Diagnose(host string, port int) error {
 	return nil
 }
 
+func printNetworkContext(ctx types.NetworkContext) {
+	line := dim(strings.Repeat("-", 40))
+	fmt.Printf("  %s\n\n", bold("Your network:"))
+
+	ip := "unknown"
+	if ctx.PublicIP != nil {
+		ip = *ctx.PublicIP
+	}
+	country := ""
+	if ctx.Country != nil {
+		country = dim(" (" + *ctx.Country + ")")
+	}
+	fmt.Printf("     %s    %s%s\n", dim("IP:"), ip, country)
+
+	resolverLabel := ""
+	if ctx.ResolverLabel != nil {
+		resolverLabel = dim(" (" + *ctx.ResolverLabel + ")")
+	}
+	fmt.Printf("     %s   %s%s\n", dim("DNS:"), ctx.ResolverIP, resolverLabel)
+
+	ipv6Text := dim("not available")
+	if ctx.IPv6Available {
+		ipv6Text = green("available") + dim(" (not tested)")
+	}
+	fmt.Printf("     %s  %s\n\n", dim("IPv6:"), ipv6Text)
+	fmt.Println(line)
+	fmt.Println()
+}
+
 func printDNS(result types.DnsResult) {
 	duration := dim(fmt.Sprintf("%dms", result.DurationMs))
-	resolver := dim(fmt.Sprintf("resolver: %s", result.Resolver))
 
 	if !result.Ok {
 		code := ""
@@ -78,7 +113,7 @@ func printDNS(result types.DnsResult) {
 		return
 	}
 
-	fmt.Printf("  %s  DNS  %s  %s\n", green("✓"), duration, resolver)
+	fmt.Printf("  %s  DNS  %s  %s\n", green("✓"), duration, dim(fmt.Sprintf("(resolver: %s)", result.Resolver)))
 
 	if len(result.ARecords) > 0 {
 		fmt.Printf("     %s    %s\n", dim("A:"), strings.Join(result.ARecords, ", "))
@@ -92,11 +127,10 @@ func printDNS(result types.DnsResult) {
 		return
 	}
 
-	ttlPart := ""
 	if result.TTL != nil {
-		ttlPart = fmt.Sprintf("  TTL: %ds", *result.TTL)
+		fmt.Printf("     %s  %ds\n", dim("TTL:"), *result.TTL)
 	}
-	fmt.Printf("     %s resolves correctly%s\n", dim("->"), ttlPart)
+	fmt.Printf("     %s resolves correctly\n", dim("->"))
 
 	if result.CDN != nil {
 		fmt.Printf("     %s likely behind %s %s\n", dim("->"), *result.CDN, dim("(best-effort)"))
@@ -196,14 +230,16 @@ func printHTTP(result *types.HttpResult) {
 
 	fmt.Printf("  %s  HTTP  %s\n", green("✓"), duration)
 	if result.StatusCode != nil {
-		fmt.Printf("     %s %d\n", dim("status:"), *result.StatusCode)
+		fmt.Printf("     %s %d %s\n", dim("status:"), *result.StatusCode, statusLabel(*result.StatusCode))
 	}
 	if len(result.Redirects) > 0 {
 		fmt.Printf("     %s\n", dim("redirects:"))
 		for _, target := range result.Redirects {
-			fmt.Printf("       %s\n", dim(target))
+			fmt.Printf("       %s %s\n", dim("->"), dim(target))
 		}
 		fmt.Printf("       %s final\n", dim("->"))
+	} else {
+		fmt.Printf("     %s %s\n", dim("redirects:"), dim("(none)"))
 	}
 
 	if len(result.Headers) > 0 {
@@ -260,7 +296,7 @@ func printHTTP(result *types.HttpResult) {
 	}
 
 	if result.CDN != nil {
-		fmt.Printf("     %s served via %s\n", dim("->"), *result.CDN)
+		fmt.Printf("     %s served via %s %s\n", dim("->"), *result.CDN, dim("(CDN)"))
 	}
 
 	if result.IPv6 != nil && !result.IPv6.Ok {
@@ -277,6 +313,37 @@ func printHTTP(result *types.HttpResult) {
 
 	if result.DurationMs > 2000 {
 		fmt.Printf("     %s slow response (%dms)\n", yellow("->"), result.DurationMs)
+	}
+}
+
+func statusLabel(code int) string {
+	switch code {
+	case 200:
+		return "OK"
+	case 201:
+		return "Created"
+	case 301:
+		return "Moved Permanently"
+	case 302:
+		return "Found (Redirect)"
+	case 400:
+		return "Bad Request"
+	case 401:
+		return "Unauthorized"
+	case 403:
+		return "Forbidden"
+	case 404:
+		return "Not Found"
+	case 429:
+		return "Too Many Requests"
+	case 500:
+		return "Server Error"
+	case 502:
+		return "Bad Gateway"
+	case 503:
+		return "Service Unavailable"
+	default:
+		return ""
 	}
 }
 

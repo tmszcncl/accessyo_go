@@ -1,5 +1,13 @@
 package types
 
+type NetworkContext struct {
+	PublicIP      *string
+	Country       *string
+	ResolverIP    string
+	ResolverLabel *string
+	IPv6Available bool
+}
+
 type IpCheckResult struct {
 	Ok         bool
 	StatusCode *int
