@@ -36,18 +36,13 @@ var keyHeaders = []string{
 
 var hstsMaxAgePattern = regexp.MustCompile(`max-age=(\d+)`)
 
-func CheckHTTP(host string, aRecords []string, aaaaRecords []string) types.HttpResult {
-	return CheckHTTPWithTimeout(host, aRecords, aaaaRecords, httpTimeout)
+func CheckHTTP(target string, hostForWww string, aRecords []string, aaaaRecords []string) types.HttpResult {
+	return CheckHTTPWithTimeout(target, hostForWww, aRecords, aaaaRecords, httpTimeout)
 }
 
-func CheckHTTPWithTimeout(host string, aRecords []string, aaaaRecords []string, timeoutMs int) types.HttpResult {
+func CheckHTTPWithTimeout(target string, hostForWww string, aRecords []string, aaaaRecords []string, timeoutMs int) types.HttpResult {
 	if timeoutMs <= 0 {
 		timeoutMs = httpTimeout
-	}
-
-	target := host
-	if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
-		target = "https://" + target
 	}
 
 	start := time.Now()
@@ -85,7 +80,7 @@ func CheckHTTPWithTimeout(host string, aRecords []string, aaaaRecords []string, 
 	}()
 	go func() {
 		defer wg.Done()
-		wwwCheck = CheckWwwRedirect(host, mainResult.Redirects)
+		wwwCheck = CheckWwwRedirect(hostForWww, mainResult.Redirects)
 	}()
 	wg.Wait()
 

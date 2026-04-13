@@ -8,43 +8,44 @@ import (
 	"sync"
 
 	"github.com/tmszcncl/accessyo_go/internal/checks"
-	"github.com/tmszcncl/accessyo_go/internal/types"
 )
 
 type batchResult struct {
-	host     string
+	target   string
 	ok       bool
 	failedAt string
 	warnings []string
 }
 
-func checkOne(host string) batchResult {
-	return checkOneWithTimeout(host, defaultTimeoutMs)
+func checkOne(input string) batchResult {
+	return checkOneWithTimeout(input, defaultTimeoutMs)
 }
 
-func checkOneWithTimeout(host string, timeoutMs int) batchResult {
-	dns := checks.CheckDNS(host, timeoutMs)
+func checkOneWithTimeout(input string, timeoutMs int) batchResult {
+	parsed := parseTarget(input, 443)
+
+	dns := checks.CheckDNS(parsed.host, timeoutMs)
 	if !dns.Ok {
-		return batchResult{host: host, ok: false, failedAt: "DNS", warnings: []string{}}
+		return batchResult{target: parsed.normalizedTarget, ok: false, failedAt: "DNS", warnings: []string{}}
 	}
 
-	tcp := checks.CheckTCP(host, 443, timeoutMs)
+	tcp := checks.CheckTCP(parsed.host, parsed.port, timeoutMs)
 	if !tcp.Ok {
-		return batchResult{host: host, ok: false, failedAt: "TCP", warnings: []string{}}
+		return batchResult{target: parsed.normalizedTarget, ok: false, failedAt: "TCP", warnings: []string{}}
 	}
 
-	tls := checks.CheckTLS(host, 443, timeoutMs)
+	tls := checks.CheckTLS(parsed.host, parsed.port, timeoutMs)
 	if !tls.Ok {
-		return batchResult{host: host, ok: false, failedAt: "TLS", warnings: []string{}}
+		return batchResult{target: parsed.normalizedTarget, ok: false, failedAt: "TLS", warnings: []string{}}
 	}
 
-	http := checks.CheckHTTPWithTimeout(host, dns.ARecords, dns.AaaaRecords, timeoutMs)
+	http := checks.CheckHTTPWithTimeout(parsed.httpTarget, parsed.host, dns.ARecords, dns.AaaaRecords, timeoutMs)
 	if !http.Ok {
 		code := ""
 		if http.StatusCode != nil {
 			code = fmt.Sprintf(" %d", *http.StatusCode)
 		}
-		return batchResult{host: host, ok: false, failedAt: "HTTP" + code, warnings: []string{}}
+		return batchResult{target: parsed.normalizedTarget, ok: false, failedAt: "HTTP" + code, warnings: []string{}}
 	}
 
 	warnings := make([]string, 0)
@@ -67,31 +68,7 @@ func checkOneWithTimeout(host string, timeoutMs int) batchResult {
 		warnings = append(warnings, fmt.Sprintf("slow %dms", http.DurationMs))
 	}
 
-	return batchResult{host: host, ok: true, warnings: warnings}
-}
-
-func runChecks(host string, timeoutMs int) (types.DnsResult, *types.TcpResult, *types.TlsResult, *types.HttpResult) {
-	dns := checks.CheckDNS(host, timeoutMs)
-
-	var tcp *types.TcpResult
-	if dns.Ok {
-		t := checks.CheckTCP(host, 443, timeoutMs)
-		tcp = &t
-	}
-
-	var tls *types.TlsResult
-	if tcp != nil && tcp.Ok {
-		t := checks.CheckTLS(host, 443, timeoutMs)
-		tls = &t
-	}
-
-	var httpResult *types.HttpResult
-	if (tls != nil && tls.Ok) || (tls == nil && tcp != nil && tcp.Ok) {
-		h := checks.CheckHTTPWithTimeout(host, dns.ARecords, dns.AaaaRecords, timeoutMs)
-		httpResult = &h
-	}
-
-	return dns, tcp, tls, httpResult
+	return batchResult{target: parsed.normalizedTarget, ok: true, warnings: warnings}
 }
 
 func Batch(hosts []string, timeoutMs int, jsonOutput bool, debugOutput bool) (bool, error) {
@@ -102,13 +79,14 @@ func Batch(hosts []string, timeoutMs int, jsonOutput bool, debugOutput bool) (bo
 	if jsonOutput {
 		outputs := make([]JsonOutput, len(hosts))
 		var wg sync.WaitGroup
-		for i, host := range hosts {
+		for i, input := range hosts {
 			wg.Add(1)
-			go func(index int, h string) {
+			go func(index int, raw string) {
 				defer wg.Done()
-				dns, tcp, tls, httpResult := runChecks(h, timeoutMs)
-				outputs[index] = buildJSONOutput(h, dns, tcp, tls, httpResult)
-			}(i, host)
+				parsed := parseTarget(raw, 443)
+				dns, tcp, tls, httpResult := runChecksForTarget(parsed, timeoutMs)
+				outputs[index] = buildJSONOutput(parsed.normalizedTarget, dns, tcp, tls, httpResult)
+			}(i, input)
 		}
 		wg.Wait()
 
@@ -148,9 +126,12 @@ func Batch(hosts []string, timeoutMs int, jsonOutput bool, debugOutput bool) (bo
 	fmt.Println()
 
 	maxLen := 0
-	for _, host := range hosts {
-		if len(host) > maxLen {
-			maxLen = len(host)
+	labels := make([]string, 0, len(hosts))
+	for _, input := range hosts {
+		label := parseTarget(input, 443).normalizedTarget
+		labels = append(labels, label)
+		if len(label) > maxLen {
+			maxLen = len(label)
 		}
 	}
 
@@ -180,8 +161,8 @@ func Batch(hosts []string, timeoutMs int, jsonOutput bool, debugOutput bool) (bo
 	isTTY := isTerminal()
 
 	if isTTY {
-		for _, host := range hosts {
-			fmt.Printf("  %s%s%s\n", padRight(host, maxLen+3), dim("·"), dim(" · ·"))
+		for _, label := range labels {
+			fmt.Printf("  %s%s%s\n", padRight(label, maxLen+3), dim("·"), dim(" · ·"))
 		}
 
 		var mu sync.Mutex
@@ -195,7 +176,7 @@ func Batch(hosts []string, timeoutMs int, jsonOutput bool, debugOutput bool) (bo
 
 				mu.Lock()
 				defer mu.Unlock()
-				updateRow(hosts, maxLen, index, resultText(result))
+				updateRow(labels, maxLen, index, resultText(result))
 			}(i, host)
 		}
 		wg.Wait()
@@ -214,7 +195,7 @@ func Batch(hosts []string, timeoutMs int, jsonOutput bool, debugOutput bool) (bo
 		spinner.Stop()
 
 		for i, result := range results {
-			label := hosts[i]
+			label := labels[i]
 			fmt.Printf("  %s%s\n", padRight(label, maxLen+3), resultText(result))
 		}
 	}
@@ -245,9 +226,9 @@ func Batch(hosts []string, timeoutMs int, jsonOutput bool, debugOutput bool) (bo
 	return failing == 0, nil
 }
 
-func updateRow(hosts []string, maxLen int, index int, text string) {
-	up := len(hosts) - index
-	label := hosts[index]
+func updateRow(labels []string, maxLen int, index int, text string) {
+	up := len(labels) - index
+	label := labels[index]
 	fmt.Printf("\x1b[%dA\r\x1b[2K  %s%s\x1b[%dB\r", up, padRight(label, maxLen+3), text, up)
 }
 

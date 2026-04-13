@@ -21,14 +21,15 @@ type renderOptions struct {
 	hideTiming bool
 }
 
-func Diagnose(host string, port int, timeoutMs int, jsonOutput bool, debugOutput bool) (bool, error) {
+func Diagnose(input string, port int, timeoutMs int, jsonOutput bool, debugOutput bool) (bool, error) {
 	if timeoutMs <= 0 {
 		timeoutMs = defaultTimeoutMs
 	}
+	target := parseTarget(input, port)
 
 	if jsonOutput {
-		dns, tcp, tls, httpResult := runChecks(host, timeoutMs)
-		out := buildJSONOutput(host, dns, tcp, tls, httpResult)
+		dns, tcp, tls, httpResult := runChecksForTarget(target, timeoutMs)
+		out := buildJSONOutput(target.normalizedTarget, dns, tcp, tls, httpResult)
 		encoded, err := json.MarshalIndent(out, "", "  ")
 		if err != nil {
 			return false, err
@@ -44,50 +45,47 @@ func Diagnose(host string, port int, timeoutMs int, jsonOutput bool, debugOutput
 	spinner.Stop()
 
 	printNetworkContext(ctx, debugOutput)
-	return diagnoseHost(host, port, nil, timeoutMs, debugOutput)
+	return diagnoseHost(input, port, nil, timeoutMs, debugOutput)
 }
 
-func diagnoseHost(host string, port int, displayHosts []string, timeoutMs int, debugOutput bool) (bool, error) {
+func diagnoseHost(input string, port int, displayHosts []string, timeoutMs int, debugOutput bool) (bool, error) {
 	if timeoutMs <= 0 {
 		timeoutMs = defaultTimeoutMs
 	}
+	target := parseTarget(input, port)
 
 	render := renderOptions{
 		debug:      debugOutput,
 		hideTiming: displayHosts != nil,
 	}
 
-	header := host
-	if displayHosts != nil {
+	header := input
+	if displayHosts == nil {
+		header = target.normalizedTarget
+	} else {
 		if len(displayHosts) <= 3 {
-			header = strings.Join(displayHosts, ", ")
+			items := make([]string, 0, len(displayHosts))
+			for _, value := range displayHosts {
+				items = append(items, parseTarget(value, port).normalizedTarget)
+			}
+			header = strings.Join(items, ", ")
 		} else {
-			header = strings.Join(displayHosts[:3], ", ") + dim(fmt.Sprintf(" (+%d more)", len(displayHosts)-3))
+			items := make([]string, 0, 3)
+			for _, value := range displayHosts[:3] {
+				items = append(items, parseTarget(value, port).normalizedTarget)
+			}
+			header = strings.Join(items, ", ") + dim(fmt.Sprintf(" (+%d more)", len(displayHosts)-3))
 		}
 	}
 
 	fmt.Printf("  %s\n\n", bold(header))
+	if displayHosts == nil && target.parsedFrom != nil {
+		fmt.Printf("  %s %s\n\n", dim("->"), dim("parsed from: "+*target.parsedFrom))
+	}
 
 	spinner := startSpinner("Running checks...")
 
-	dnsResult := checks.CheckDNS(host, timeoutMs)
-	var tcpResult *types.TcpResult
-	if dnsResult.Ok {
-		r := checks.CheckTCP(host, port, timeoutMs)
-		tcpResult = &r
-	}
-
-	var tlsResult *types.TlsResult
-	if tcpResult != nil && tcpResult.Ok {
-		r := checks.CheckTLS(host, port, timeoutMs)
-		tlsResult = &r
-	}
-
-	var httpResult *types.HttpResult
-	if (tlsResult != nil && tlsResult.Ok) || (tlsResult == nil && tcpResult != nil && tcpResult.Ok) {
-		r := checks.CheckHTTPWithTimeout(host, dnsResult.ARecords, dnsResult.AaaaRecords, timeoutMs)
-		httpResult = &r
-	}
+	dnsResult, tcpResult, tlsResult, httpResult := runChecksForTarget(target, timeoutMs)
 
 	spinner.Stop()
 
@@ -114,6 +112,30 @@ func diagnoseHost(host string, port int, displayHosts []string, timeoutMs int, d
 		HTTP: httpResult,
 	})
 	return result.AllOK, nil
+}
+
+func runChecksForTarget(target parsedTarget, timeoutMs int) (types.DnsResult, *types.TcpResult, *types.TlsResult, *types.HttpResult) {
+	dnsResult := checks.CheckDNS(target.host, timeoutMs)
+
+	var tcpResult *types.TcpResult
+	if dnsResult.Ok {
+		r := checks.CheckTCP(target.host, target.port, timeoutMs)
+		tcpResult = &r
+	}
+
+	var tlsResult *types.TlsResult
+	if tcpResult != nil && tcpResult.Ok {
+		r := checks.CheckTLS(target.host, target.port, timeoutMs)
+		tlsResult = &r
+	}
+
+	var httpResult *types.HttpResult
+	if (tlsResult != nil && tlsResult.Ok) || (tlsResult == nil && tcpResult != nil && tcpResult.Ok) {
+		r := checks.CheckHTTPWithTimeout(target.httpTarget, target.host, dnsResult.ARecords, dnsResult.AaaaRecords, timeoutMs)
+		httpResult = &r
+	}
+
+	return dnsResult, tcpResult, tlsResult, httpResult
 }
 
 func printNetworkContext(ctx types.NetworkContext, debug bool) {
