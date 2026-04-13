@@ -3,6 +3,9 @@ package types
 type NetworkContext struct {
 	PublicIP      *string `json:"publicIP,omitempty"`
 	Country       *string `json:"country,omitempty"`
+	CountryName   *string `json:"countryName,omitempty"`
+	ISP           *string `json:"isp,omitempty"`
+	ASN           *string `json:"asn,omitempty"`
 	ResolverIP    string  `json:"resolverIP"`
 	ResolverLabel *string `json:"resolverLabel,omitempty"`
 }

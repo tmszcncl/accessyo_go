@@ -22,11 +22,14 @@ type JsonChecks struct {
 }
 
 type JsonSummary struct {
-	OK           bool     `json:"ok"`
-	Problem      *string  `json:"problem"`
-	LikelyCause  *string  `json:"likelyCause"`
-	WhatYouCanDo []string `json:"whatYouCanDo"`
-	TotalMs      int64    `json:"totalMs"`
+	OK           bool              `json:"ok"`
+	Status       string            `json:"status"`
+	Explanation  string            `json:"explanation"`
+	Warnings     []summary.Warning `json:"warnings"`
+	Problem      *string           `json:"problem"`
+	LikelyCause  *string           `json:"likelyCause"`
+	WhatYouCanDo []string          `json:"whatYouCanDo"`
+	TotalMs      int64             `json:"totalMs"`
 }
 
 func buildJSONOutput(host string, dns types.DnsResult, tcp *types.TcpResult, tls *types.TlsResult, httpResult *types.HttpResult) JsonOutput {
@@ -59,6 +62,9 @@ func buildJSONOutput(host string, dns types.DnsResult, tcp *types.TcpResult, tls
 		},
 		Summary: JsonSummary{
 			OK:           s.AllOK,
+			Status:       string(s.Status),
+			Explanation:  s.Explanation,
+			Warnings:     s.Warnings,
 			Problem:      s.Problem,
 			LikelyCause:  s.LikelyCause,
 			WhatYouCanDo: s.WhatYouCanDo,

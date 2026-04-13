@@ -109,27 +109,48 @@ func diagnoseHost(host string, port int, displayHosts []string, timeoutMs int) (
 
 func printNetworkContext(ctx types.NetworkContext) {
 	line := dim(strings.Repeat("-", 40))
-	fmt.Printf("  %s\n\n", bold("Your network:"))
+	fmt.Printf("  %s\n\n", bold("Network"))
 
-	ip := "unknown"
+	location := formatLocation(ctx.CountryName, ctx.Country)
+	if location != "" {
+		printNetworkRow("Location", location)
+	}
+	if ctx.ISP != nil {
+		printNetworkRow("ISP", *ctx.ISP)
+	}
+	if ctx.ASN != nil {
+		printNetworkRow("ASN", *ctx.ASN)
+	}
 	if ctx.PublicIP != nil {
-		ip = *ctx.PublicIP
+		printNetworkRow("IP", maskPublicIP(*ctx.PublicIP))
 	}
-	country := ""
-	if ctx.Country != nil {
-		country = dim(" (" + *ctx.Country + ")")
-	}
-	fmt.Printf("     %s    %s%s\n", dim("IP:"), ip, country)
-
-	resolverLabel := ""
-	if ctx.ResolverLabel != nil {
-		resolverLabel = dim(" (" + *ctx.ResolverLabel + ")")
-	}
-	fmt.Printf("     %s   %s%s\n", dim("DNS:"), ctx.ResolverIP, resolverLabel)
 
 	fmt.Println()
 	fmt.Println(line)
 	fmt.Println()
+}
+
+func printNetworkRow(label string, value string) {
+	key := fmt.Sprintf("%-9s", label+":")
+	fmt.Printf("  %s %s\n", dim(key), value)
+}
+
+func formatLocation(countryName, countryCode *string) string {
+	if countryName != nil && countryCode != nil {
+		return fmt.Sprintf("%s (%s)", *countryName, *countryCode)
+	}
+	if countryName != nil {
+		return *countryName
+	}
+	if countryCode != nil {
+		return *countryCode
+	}
+	return ""
+}
+
+func maskPublicIP(ip string) string {
+	// Temporary: full IP display is enabled (masking will be revisited later).
+	return ip
 }
 
 func printDNS(result types.DnsResult, hideTiming bool) {
@@ -421,18 +442,11 @@ func printHTTP(result *types.HttpResult, hideTiming bool) {
 		fmt.Printf("     %s served via %s %s\n", dim("->"), *result.CDN, dim("(CDN edge)"))
 	}
 
-	if result.IPv4 != nil && result.IPv4.Ok && result.IPv6 != nil && result.IPv6.Ok {
-		fmt.Printf("     %s both IPv4 and IPv6 working\n", dim("->"))
-	} else if result.IPv4 != nil && result.IPv4.Ok && result.IPv6 != nil && !result.IPv6.Ok {
-		fmt.Printf("     %s IPv6 connectivity issue (may affect some users)\n", yellow("->"))
-	}
-
-	if result.BrowserDiffers != nil && *result.BrowserDiffers {
-		statusText := "?"
-		if result.BrowserStatusCode != nil {
-			statusText = fmt.Sprintf("%d", *result.BrowserStatusCode)
+	if info := getClientVarianceInfo(result); info != nil {
+		fmt.Printf("     %s %s\n", dim("ℹ"), info.title)
+		for _, detail := range info.details {
+			fmt.Printf("       %s %s\n", dim("->"), detail)
 		}
-		fmt.Printf("     %s server responds differently to browsers (status: %s vs %d)\n", yellow("->"), statusText, status)
 	}
 
 	if result.WwwCheck != nil {
@@ -448,8 +462,20 @@ func printHTTP(result *types.HttpResult, hideTiming bool) {
 		}
 	}
 
-	if result.DurationMs > 2000 {
-		fmt.Printf("     %s slow response (%dms)\n", yellow("->"), result.DurationMs)
+}
+
+type clientVarianceInfo struct {
+	title   string
+	details []string
+}
+
+func getClientVarianceInfo(result *types.HttpResult) *clientVarianceInfo {
+	if result == nil || result.BrowserDiffers == nil || !*result.BrowserDiffers {
+		return nil
+	}
+	return &clientVarianceInfo{
+		title:   "response varies by client",
+		details: []string{"server may treat CLI and browsers differently"},
 	}
 }
 
@@ -562,32 +588,37 @@ func printSummary(input summary.Input) {
 	fmt.Printf("  %-6s %s\n", "Total", dim(fmt.Sprintf("%dms", total)))
 	fmt.Println()
 
-	if s.AllOK {
-		fmt.Printf("  %s %s\n\n", green("STATUS:"), green("✓ WORKING"))
-		fmt.Printf("  %s all checks passed\n", dim("->"))
+	if s.Status == summary.StatusWorking {
+		fmt.Printf("  %s %s\n", green("STATUS:"), green("✓ WORKING"))
+	} else if s.Status == summary.StatusDegraded {
+		fmt.Printf("  %s %s\n", yellow("STATUS:"), yellow("⚠ DEGRADED"))
+	} else {
+		fmt.Printf("  %s %s\n", red("STATUS:"), red("✗ FAIL"))
+	}
+	fmt.Println()
+
+	arrow := dim("->")
+	if s.Status == summary.StatusDegraded {
+		arrow = yellow("->")
+	} else if s.Status == summary.StatusFail {
+		arrow = red("->")
+	}
+	fmt.Printf("  %s %s\n", arrow, s.Explanation)
+
+	if len(s.Warnings) > 0 {
 		fmt.Println()
-		fmt.Println(line)
-		return
-	}
-
-	fmt.Printf("  %s %s\n\n", red("STATUS:"), red("✗ NOT WORKING"))
-
-	if s.Problem != nil {
-		fmt.Printf("  %s\n", bold(red("ROOT CAUSE:")))
-		fmt.Printf("  %s %s\n\n", red("->"), *s.Problem)
-	}
-
-	if s.LikelyCause != nil {
-		fmt.Printf("  %s\n", bold("Likely cause:"))
-		fmt.Printf("  %s %s\n\n", dim("->"), *s.LikelyCause)
-	}
-
-	if len(s.WhatYouCanDo) > 0 {
-		fmt.Printf("  %s\n", bold("What you can do:"))
-		for _, tip := range s.WhatYouCanDo {
-			fmt.Printf("  %s %s\n", dim("->"), tip)
+		fmt.Printf("  %s\n\n", bold("Warnings"))
+		for _, warning := range s.Warnings {
+			icon := yellow("⚠")
+			if warning.Level == "info" {
+				icon = dim("ℹ")
+			}
+			fmt.Printf("  %s %s\n\n", icon, warning.Title)
+			for _, impactLine := range warning.Impact {
+				fmt.Printf("    %s %s\n", dim("->"), impactLine)
+			}
+			fmt.Println()
 		}
-		fmt.Println()
 	}
 
 	fmt.Println(line)

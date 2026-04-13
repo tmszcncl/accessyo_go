@@ -22,7 +22,16 @@ func TestBuildJSONOutput(t *testing.T) {
 	}
 	baseTCP := &types.TcpResult{Ok: true, DurationMs: 30, Port: 443}
 	baseTLS := &types.TlsResult{Ok: true, DurationMs: 80}
-	baseHTTP := &types.HttpResult{Ok: true, DurationMs: 150, StatusCode: intPtr(200), Redirects: []string{}, Headers: map[string]string{}}
+	baseHTTP := &types.HttpResult{
+		Ok:         true,
+		DurationMs: 150,
+		StatusCode: intPtr(200),
+		TTFB:       int64Ptr(200),
+		Redirects:  []string{},
+		Headers:    map[string]string{},
+		IPv4:       &types.IpCheckResult{Ok: true, DurationMs: 20},
+		IPv6:       &types.IpCheckResult{Ok: true, DurationMs: 30},
+	}
 
 	t.Run("includes host and timestamp", func(t *testing.T) {
 		out := buildJSONOutput("example.com", baseDNS, baseTCP, baseTLS, baseHTTP)
@@ -62,8 +71,14 @@ func TestBuildJSONOutput(t *testing.T) {
 		if !out.Summary.OK {
 			t.Fatalf("expected ok true")
 		}
+		if out.Summary.Status != "WORKING" {
+			t.Fatalf("expected status WORKING, got %q", out.Summary.Status)
+		}
 		if out.Summary.Problem != nil {
 			t.Fatalf("expected problem nil")
+		}
+		if out.Summary.Explanation == "" {
+			t.Fatalf("expected explanation")
 		}
 	})
 
@@ -73,8 +88,35 @@ func TestBuildJSONOutput(t *testing.T) {
 		if out.Summary.OK {
 			t.Fatalf("expected ok false")
 		}
+		if out.Summary.Status != "FAIL" {
+			t.Fatalf("expected status FAIL, got %q", out.Summary.Status)
+		}
 		if out.Summary.Problem == nil {
 			t.Fatalf("expected problem to be present")
+		}
+	})
+
+	t.Run("sets DEGRADED while remaining reachable for IPv4 instability", func(t *testing.T) {
+		ttfb := int64(1400)
+		degradedHTTP := &types.HttpResult{
+			Ok:         true,
+			DurationMs: 210,
+			StatusCode: intPtr(200),
+			TTFB:       &ttfb,
+			Redirects:  []string{},
+			Headers:    map[string]string{},
+			IPv4:       &types.IpCheckResult{Ok: false, DurationMs: 90, Error: stringPtr("timeout")},
+			IPv6:       &types.IpCheckResult{Ok: true, DurationMs: 40},
+		}
+		out := buildJSONOutput("degraded.example", baseDNS, baseTCP, baseTLS, degradedHTTP)
+		if !out.Summary.OK {
+			t.Fatalf("expected ok true for DEGRADED")
+		}
+		if out.Summary.Status != "DEGRADED" {
+			t.Fatalf("expected status DEGRADED, got %q", out.Summary.Status)
+		}
+		if len(out.Summary.Warnings) == 0 {
+			t.Fatalf("expected warnings for degraded case")
 		}
 	})
 
@@ -90,6 +132,8 @@ func TestBuildJSONOutput(t *testing.T) {
 }
 
 func intPtr(v int) *int { return &v }
+
+func int64Ptr(v int64) *int64 { return &v }
 
 func uint32Ptr(v uint32) *uint32 { return &v }
 
