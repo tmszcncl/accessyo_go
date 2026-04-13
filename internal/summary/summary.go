@@ -107,7 +107,7 @@ func Build(input Input) Result {
 	return Result{
 		AllOK:        true,
 		Status:       status,
-		Explanation:  "site is reachable and working",
+		Explanation:  "site is reachable",
 		Warnings:     warnings,
 		Problem:      nil,
 		LikelyCause:  nil,
@@ -245,7 +245,7 @@ func collectWarnings(input Input) []Warning {
 			warnings = append(warnings, Warning{
 				Level:  "info",
 				Title:  "HSTS not set on this hostname",
-				Impact: []string{"may be enforced on redirect target"},
+				Impact: []string{"likely enforced on redirect target"},
 			})
 		} else {
 			warnings = append(warnings, Warning{

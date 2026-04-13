@@ -98,6 +98,9 @@ func TestBuild_WorkingSummary(t *testing.T) {
 	if !result.AllOK {
 		t.Fatalf("expected AllOK=true")
 	}
+	if result.Explanation != "site is reachable" {
+		t.Fatalf("expected simplified explanation, got %q", result.Explanation)
+	}
 	if len(result.Warnings) == 0 {
 		t.Fatalf("expected at least one warning (missing HSTS)")
 	}
@@ -209,6 +212,9 @@ func TestBuild_HSTSInfoWhenRedirectChangesHostname(t *testing.T) {
 	}
 	if info.Level != "info" {
 		t.Fatalf("expected info level, got %q", info.Level)
+	}
+	if len(info.Impact) == 0 || info.Impact[0] != "likely enforced on redirect target" {
+		t.Fatalf("expected updated HSTS wording, got %#v", info.Impact)
 	}
 }
 

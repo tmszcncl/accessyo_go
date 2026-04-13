@@ -94,7 +94,7 @@ func runChecks(host string, timeoutMs int) (types.DnsResult, *types.TcpResult, *
 	return dns, tcp, tls, httpResult
 }
 
-func Batch(hosts []string, timeoutMs int, jsonOutput bool) (bool, error) {
+func Batch(hosts []string, timeoutMs int, jsonOutput bool, debugOutput bool) (bool, error) {
 	if timeoutMs <= 0 {
 		timeoutMs = defaultTimeoutMs
 	}
@@ -127,6 +127,24 @@ func Batch(hosts []string, timeoutMs int, jsonOutput bool) (bool, error) {
 		return allOK, nil
 	}
 
+	if debugOutput {
+		fmt.Println()
+		separator := dim(strings.Repeat("-", 40))
+		allOK := true
+		for i, host := range hosts {
+			if i > 0 {
+				fmt.Println(separator)
+				fmt.Println()
+			}
+			ok, err := diagnoseHost(host, 443, nil, timeoutMs, true)
+			if err != nil {
+				return false, err
+			}
+			allOK = allOK && ok
+		}
+		return allOK, nil
+	}
+
 	fmt.Println()
 
 	maxLen := 0
@@ -145,7 +163,7 @@ func Batch(hosts []string, timeoutMs int, jsonOutput bool) (bool, error) {
 			if r.failedAt != "" {
 				reason = dim(" (" + r.failedAt + ")")
 			}
-			status = red("✗ NOT WORKING") + reason
+			status = red("✗ FAIL") + reason
 		}
 
 		if len(r.warnings) == 0 {
@@ -223,41 +241,6 @@ func Batch(hosts []string, timeoutMs int, jsonOutput bool) (bool, error) {
 		failingText = red(failingText)
 	}
 	fmt.Printf("  %s, %s\n\n", workingText, failingText)
-
-	failures := make([]batchResult, 0)
-	for _, result := range results {
-		if !result.ok {
-			failures = append(failures, result)
-		}
-	}
-
-	if len(failures) > 0 {
-		groups := map[string][]batchResult{}
-		order := make([]string, 0)
-		for _, result := range failures {
-			key := result.failedAt
-			if key == "" {
-				key = "unknown"
-			}
-			if _, ok := groups[key]; !ok {
-				order = append(order, key)
-			}
-			groups[key] = append(groups[key], result)
-		}
-
-		for _, key := range order {
-			group := groups[key]
-			displayHosts := make([]string, 0, len(group))
-			for _, result := range group {
-				displayHosts = append(displayHosts, result.host)
-			}
-			if len(group) > 0 {
-				if _, err := diagnoseHost(group[0].host, 443, displayHosts, timeoutMs); err != nil {
-					return false, err
-				}
-			}
-		}
-	}
 
 	return failing == 0, nil
 }

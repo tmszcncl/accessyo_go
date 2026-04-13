@@ -19,7 +19,7 @@ func main() {
 	ok := true
 	var err error
 	if args[0] == "diagnose" {
-		timeout, jsonOutput, remaining, parseErr := parseOptions(args[1:])
+		timeout, jsonOutput, debugOutput, remaining, parseErr := parseOptions(args[1:])
 		if parseErr != nil {
 			printUsage()
 			os.Exit(2)
@@ -28,9 +28,9 @@ func main() {
 			printUsage()
 			os.Exit(2)
 		}
-		ok, err = commands.Diagnose(remaining[0], 443, timeout, jsonOutput)
+		ok, err = commands.Diagnose(remaining[0], 443, timeout, jsonOutput, debugOutput)
 	} else {
-		timeout, jsonOutput, remaining, parseErr := parseOptions(args)
+		timeout, jsonOutput, debugOutput, remaining, parseErr := parseOptions(args)
 		if parseErr != nil {
 			printUsage()
 			os.Exit(2)
@@ -40,9 +40,9 @@ func main() {
 			os.Exit(2)
 		}
 		if len(remaining) == 1 {
-			ok, err = commands.Diagnose(remaining[0], 443, timeout, jsonOutput)
+			ok, err = commands.Diagnose(remaining[0], 443, timeout, jsonOutput, debugOutput)
 		} else {
-			ok, err = commands.Batch(remaining, timeout, jsonOutput)
+			ok, err = commands.Batch(remaining, timeout, jsonOutput, debugOutput)
 		}
 	}
 
@@ -57,8 +57,8 @@ func main() {
 
 func printUsage() {
 	fmt.Fprintln(os.Stderr, "Usage:")
-	fmt.Fprintln(os.Stderr, "  accessyo [--timeout <ms>] [--json] <host...>")
-	fmt.Fprintln(os.Stderr, "  accessyo diagnose [--timeout <ms>] [--json] <host>")
+	fmt.Fprintln(os.Stderr, "  accessyo [--timeout <ms>] [--json] [--debug] <host...>")
+	fmt.Fprintln(os.Stderr, "  accessyo diagnose [--timeout <ms>] [--json] [--debug] <host>")
 }
 
 func normalizedTimeout(raw int) int {
@@ -68,7 +68,7 @@ func normalizedTimeout(raw int) int {
 	return raw
 }
 
-func parseOptions(args []string) (timeoutMs int, jsonOutput bool, positionals []string, err error) {
+func parseOptions(args []string) (timeoutMs int, jsonOutput bool, debugOutput bool, positionals []string, err error) {
 	timeoutMs = 5000
 	positionals = make([]string, 0)
 
@@ -77,29 +77,31 @@ func parseOptions(args []string) (timeoutMs int, jsonOutput bool, positionals []
 		switch {
 		case arg == "--json":
 			jsonOutput = true
+		case arg == "--debug":
+			debugOutput = true
 		case strings.HasPrefix(arg, "--timeout="):
 			raw := strings.TrimPrefix(arg, "--timeout=")
 			value, parseErr := strconv.Atoi(raw)
 			if parseErr != nil {
-				return 0, false, nil, parseErr
+				return 0, false, false, nil, parseErr
 			}
 			timeoutMs = normalizedTimeout(value)
 		case arg == "--timeout":
 			if i+1 >= len(args) {
-				return 0, false, nil, fmt.Errorf("missing value for --timeout")
+				return 0, false, false, nil, fmt.Errorf("missing value for --timeout")
 			}
 			value, parseErr := strconv.Atoi(args[i+1])
 			if parseErr != nil {
-				return 0, false, nil, parseErr
+				return 0, false, false, nil, parseErr
 			}
 			timeoutMs = normalizedTimeout(value)
 			i++
 		case strings.HasPrefix(arg, "--"):
-			return 0, false, nil, fmt.Errorf("unknown option: %s", arg)
+			return 0, false, false, nil, fmt.Errorf("unknown option: %s", arg)
 		default:
 			positionals = append(positionals, arg)
 		}
 	}
 
-	return timeoutMs, jsonOutput, positionals, nil
+	return timeoutMs, jsonOutput, debugOutput, positionals, nil
 }

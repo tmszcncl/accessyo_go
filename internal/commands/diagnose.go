@@ -3,6 +3,7 @@ package commands
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/url"
 	"sort"
 	"strings"
@@ -15,7 +16,12 @@ import (
 
 const defaultTimeoutMs = 5000
 
-func Diagnose(host string, port int, timeoutMs int, jsonOutput bool) (bool, error) {
+type renderOptions struct {
+	debug      bool
+	hideTiming bool
+}
+
+func Diagnose(host string, port int, timeoutMs int, jsonOutput bool, debugOutput bool) (bool, error) {
 	if timeoutMs <= 0 {
 		timeoutMs = defaultTimeoutMs
 	}
@@ -37,16 +43,19 @@ func Diagnose(host string, port int, timeoutMs int, jsonOutput bool) (bool, erro
 	ctx := checks.GetNetworkContext()
 	spinner.Stop()
 
-	printNetworkContext(ctx)
-	return diagnoseHost(host, port, nil, timeoutMs)
+	printNetworkContext(ctx, debugOutput)
+	return diagnoseHost(host, port, nil, timeoutMs, debugOutput)
 }
 
-func diagnoseHost(host string, port int, displayHosts []string, timeoutMs int) (bool, error) {
+func diagnoseHost(host string, port int, displayHosts []string, timeoutMs int, debugOutput bool) (bool, error) {
 	if timeoutMs <= 0 {
 		timeoutMs = defaultTimeoutMs
 	}
 
-	hideTiming := displayHosts != nil
+	render := renderOptions{
+		debug:      debugOutput,
+		hideTiming: displayHosts != nil,
+	}
 
 	header := host
 	if displayHosts != nil {
@@ -82,13 +91,13 @@ func diagnoseHost(host string, port int, displayHosts []string, timeoutMs int) (
 
 	spinner.Stop()
 
-	printDNS(dnsResult, hideTiming)
+	printDNS(dnsResult, render)
 	fmt.Println()
-	printTCP(tcpResult, !dnsResult.Ok, hideTiming)
+	printTCP(tcpResult, !dnsResult.Ok, render.hideTiming)
 	fmt.Println()
-	printTLS(tlsResult, hideTiming)
+	printTLS(tlsResult, render)
 	fmt.Println()
-	printHTTP(httpResult, hideTiming)
+	printHTTP(httpResult, render)
 	fmt.Println()
 	printSummary(summary.Input{
 		DNS:  dnsResult,
@@ -107,7 +116,7 @@ func diagnoseHost(host string, port int, displayHosts []string, timeoutMs int) (
 	return result.AllOK, nil
 }
 
-func printNetworkContext(ctx types.NetworkContext) {
+func printNetworkContext(ctx types.NetworkContext, debug bool) {
 	line := dim(strings.Repeat("-", 40))
 	fmt.Printf("  %s\n\n", bold("Network"))
 
@@ -122,7 +131,7 @@ func printNetworkContext(ctx types.NetworkContext) {
 		printNetworkRow("ASN", *ctx.ASN)
 	}
 	if ctx.PublicIP != nil {
-		printNetworkRow("IP", maskPublicIP(*ctx.PublicIP))
+		printNetworkRow("IP", formatPublicIPForDisplay(*ctx.PublicIP, debug))
 	}
 
 	fmt.Println()
@@ -148,14 +157,61 @@ func formatLocation(countryName, countryCode *string) string {
 	return ""
 }
 
+func formatPublicIPForDisplay(ip string, debug bool) string {
+	if debug {
+		return ip
+	}
+	return maskPublicIP(ip)
+}
+
 func maskPublicIP(ip string) string {
-	// Temporary: full IP display is enabled (masking will be revisited later).
+	parsed := net.ParseIP(ip)
+	if parsed != nil {
+		if v4 := parsed.To4(); v4 != nil {
+			return fmt.Sprintf("%d.%d.xxx.xxx", v4[0], v4[1])
+		}
+	}
+
+	if strings.Contains(ip, ":") {
+		parts := strings.Split(ip, ":")
+		nonEmpty := make([]string, 0, len(parts))
+		for _, part := range parts {
+			if part != "" {
+				nonEmpty = append(nonEmpty, part)
+			}
+		}
+		first := "xxxx"
+		second := "xxxx"
+		if len(nonEmpty) > 0 {
+			first = nonEmpty[0]
+		}
+		if len(nonEmpty) > 1 {
+			second = nonEmpty[1]
+		}
+		return first + ":" + second + ":xxxx:xxxx:xxxx:xxxx:xxxx:xxxx"
+	}
+
 	return ip
 }
 
-func printDNS(result types.DnsResult, hideTiming bool) {
+func dnsResolutionSummary(result types.DnsResult) string {
+	hasIPv4 := len(result.ARecords) > 0
+	hasIPv6 := len(result.AaaaRecords) > 0
+	if hasIPv4 && hasIPv6 {
+		return "resolved (IPv4 + IPv6)"
+	}
+	if hasIPv4 {
+		return "resolved (IPv4)"
+	}
+	if hasIPv6 {
+		return "resolved (IPv6)"
+	}
+	return "resolved"
+}
+
+func printDNS(result types.DnsResult, render renderOptions) {
 	duration := ""
-	if !hideTiming {
+	if !render.hideTiming {
 		duration = " " + dim(fmt.Sprintf("%dms", result.DurationMs))
 	}
 
@@ -171,6 +227,12 @@ func printDNS(result types.DnsResult, hideTiming bool) {
 		} else if result.ErrorCode != nil && *result.ErrorCode == "NXDOMAIN" {
 			fmt.Printf("     %s check domain spelling\n", dim("->"))
 		}
+		return
+	}
+
+	if !render.debug {
+		fmt.Printf("  %s  DNS%s\n", green("✓"), duration)
+		fmt.Printf("     %s %s\n", dim("->"), dnsResolutionSummary(result))
 		return
 	}
 
@@ -199,12 +261,6 @@ func printDNS(result types.DnsResult, hideTiming bool) {
 			fmt.Printf("     %s split-horizon DNS detected (system DNS returns private IP)\n", yellow("->"))
 		}
 	}
-
-	if len(result.ARecords) == 0 && len(result.AaaaRecords) > 0 {
-		fmt.Printf("     %s IPv6 only - may fail on some networks\n", yellow("->"))
-		return
-	}
-
 	if result.TTL != nil {
 		fmt.Printf("     %s  %ds\n", dim("TTL:"), *result.TTL)
 	}
@@ -235,14 +291,14 @@ func printTCP(result *types.TcpResult, dnsFailed bool, hideTiming bool) {
 	fmt.Printf("  %s  TCP%s  %s\n", green("✓"), duration, dim(fmt.Sprintf("(port %d)", result.Port)))
 }
 
-func printTLS(result *types.TlsResult, hideTiming bool) {
+func printTLS(result *types.TlsResult, render renderOptions) {
 	if result == nil {
 		fmt.Printf("  %s  TLS  %s\n", dim("-"), dim("skipped"))
 		return
 	}
 
 	duration := ""
-	if !hideTiming {
+	if !render.hideTiming {
 		duration = " " + dim(fmt.Sprintf("%dms", result.DurationMs))
 	}
 
@@ -253,37 +309,39 @@ func printTLS(result *types.TlsResult, hideTiming bool) {
 	}
 
 	fmt.Printf("  %s  TLS%s\n", green("✓"), duration)
-	if result.Protocol != nil {
-		fmt.Printf("     %s %s\n", dim("protocol:"), *result.Protocol)
-	}
-	if result.Cipher != nil {
-		fmt.Printf("     %s   %s\n", dim("cipher:"), *result.Cipher)
-	}
-	if result.AlpnProtocol != nil {
-		label := dim("HTTP/1.1")
-		if *result.AlpnProtocol == "h2" {
-			label = green("HTTP/2")
+	if render.debug {
+		if result.Protocol != nil {
+			fmt.Printf("     %s %s\n", dim("protocol:"), *result.Protocol)
 		}
-		fmt.Printf("     %s    %s\n", dim("ALPN:"), label)
-	}
-	if result.CertIssuer != nil || result.CertValidTo != nil {
-		fmt.Printf("     %s\n", dim("cert:"))
-		if result.CertIssuer != nil {
-			fmt.Printf("       %s   %s\n", dim("issuer:"), *result.CertIssuer)
+		if result.Cipher != nil {
+			fmt.Printf("     %s   %s\n", dim("cipher:"), *result.Cipher)
 		}
-		if result.CertValidTo != nil {
-			validTo := *result.CertValidTo
-			if result.CertExpired != nil && *result.CertExpired {
-				validTo = red(validTo + " (EXPIRED)")
+		if result.AlpnProtocol != nil {
+			label := dim("HTTP/1.1")
+			if *result.AlpnProtocol == "h2" {
+				label = green("HTTP/2")
 			}
-			fmt.Printf("       %s %s\n", dim("valid to:"), validTo)
+			fmt.Printf("     %s    %s\n", dim("ALPN:"), label)
 		}
-		if result.HostnameMatch != nil {
-			label := red("✗ mismatch")
-			if *result.HostnameMatch {
-				label = green("✓ OK")
+		if result.CertIssuer != nil || result.CertValidTo != nil {
+			fmt.Printf("     %s\n", dim("cert:"))
+			if result.CertIssuer != nil {
+				fmt.Printf("       %s   %s\n", dim("issuer:"), *result.CertIssuer)
 			}
-			fmt.Printf("       %s %s\n", dim("hostname:"), label)
+			if result.CertValidTo != nil {
+				validTo := *result.CertValidTo
+				if result.CertExpired != nil && *result.CertExpired {
+					validTo = red(validTo + " (EXPIRED)")
+				}
+				fmt.Printf("       %s %s\n", dim("valid to:"), validTo)
+			}
+			if result.HostnameMatch != nil {
+				label := red("✗ mismatch")
+				if *result.HostnameMatch {
+					label = green("✓ OK")
+				}
+				fmt.Printf("       %s %s\n", dim("hostname:"), label)
+			}
 		}
 	}
 	fmt.Printf("     %s TLS handshake successful\n", dim("->"))
@@ -297,14 +355,43 @@ func printTLS(result *types.TlsResult, hideTiming bool) {
 	}
 }
 
-func printHTTP(result *types.HttpResult, hideTiming bool) {
+type headerEntry struct {
+	Key   string
+	Value string
+}
+
+func visibleHTTPHeaders(headers map[string]string, debug bool) []headerEntry {
+	if debug {
+		keys := make([]string, 0, len(headers))
+		for key := range headers {
+			if key == "strict-transport-security" {
+				continue
+			}
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		entries := make([]headerEntry, 0, len(keys))
+		for _, key := range keys {
+			entries = append(entries, headerEntry{Key: key, Value: headers[key]})
+		}
+		return entries
+	}
+
+	server, ok := headers["server"]
+	if !ok || server == "" {
+		return []headerEntry{}
+	}
+	return []headerEntry{{Key: "server", Value: server}}
+}
+
+func printHTTP(result *types.HttpResult, render renderOptions) {
 	if result == nil {
 		fmt.Printf("  %s  HTTP  %s\n", dim("-"), dim("skipped"))
 		return
 	}
 
 	duration := ""
-	if !hideTiming {
+	if !render.hideTiming {
 		duration = " " + dim(fmt.Sprintf("%dms", result.DurationMs))
 	}
 
@@ -347,20 +434,11 @@ func printHTTP(result *types.HttpResult, hideTiming bool) {
 		fmt.Printf("     %s\n", dim("(no redirects)"))
 	}
 
-	if len(result.Headers) > 0 {
-		keys := make([]string, 0, len(result.Headers))
-		for key := range result.Headers {
-			if key == "strict-transport-security" {
-				continue
-			}
-			keys = append(keys, key)
-		}
-		if len(keys) > 0 {
-			fmt.Printf("     %s\n", dim("headers:"))
-			sort.Strings(keys)
-			for _, key := range keys {
-				fmt.Printf("       %s %s\n", dim(key+":"), result.Headers[key])
-			}
+	headerEntries := visibleHTTPHeaders(result.Headers, render.debug)
+	if len(headerEntries) > 0 {
+		fmt.Printf("     %s\n", dim("headers:"))
+		for _, entry := range headerEntries {
+			fmt.Printf("       %s %s\n", dim(entry.Key+":"), entry.Value)
 		}
 	}
 
@@ -384,7 +462,7 @@ func printHTTP(result *types.HttpResult, hideTiming bool) {
 			fmt.Printf("     %s    %s\n", dim("hsts:"), green("✓ max-age "+ageLabel+extras))
 		}
 	} else {
-		fmt.Printf("     %s    %s\n", dim("hsts:"), yellow("✗ not set - site can be downgraded to HTTP"))
+		fmt.Printf("     %s    %s\n", dim("hsts:"), yellow("✗ not set"))
 	}
 
 	if result.IPv4 != nil || result.IPv6 != nil {
@@ -424,9 +502,7 @@ func printHTTP(result *types.HttpResult, hideTiming bool) {
 		status = *result.StatusCode
 	}
 
-	if status >= 200 && status < 300 {
-		fmt.Printf("     %s HTTP OK\n", dim("->"))
-	} else if status >= 300 && status < 400 {
+	if status >= 300 && status < 400 {
 		fmt.Printf("     %s redirects detected\n", dim("->"))
 	} else if status == 403 || status == 503 {
 		fmt.Printf("     %s request blocked (possible CDN / WAF)\n", yellow("->"))
